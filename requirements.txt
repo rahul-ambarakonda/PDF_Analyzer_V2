@@ -1,0 +1,9 @@
+pymupdf
+Pillow
+rich
+tqdm
+jinja2
+click
+python-dotenv
+opencv-python-headless
+numpy

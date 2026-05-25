@@ -1,0 +1,21 @@
+Drawing QA Agent - Code-Based Analysis Rules
+=========================================
+
+This project has been updated to use offline code-based comparison instead of Llama 3.2 Vision via Ollama. 
+
+The analytical rules implemented in `core/qa_agent.py` perform:
+1. Spatial Text Comparison: Matches text entities (searchable vector text) between Reference (Input_PDFs) and Target (Creo_PDFs) drawings.
+   - Text elements are matched using proximity (nearest-neighbor center coordinates).
+   - If a reference text element is missing in the review page, it is flagged as MISSING_ANNOTATION.
+   - If a text element has shifted position by more than the tolerance, it is flagged as TEXT_MISPLACEMENT.
+   - Font variations are ignored during analysis.
+2. Text Overlap Check: Inspects Creo text bounding boxes to see if any annotations collide with each other, flagging them as TEXT_OVERLAP.
+3. OpenCV Pixel Diffing: Renders both pages at a high resolution (300 DPI), aligns them, performs absolute diff, thresholds, applies morphological openings to eliminate noise, and detects remaining drawing contours.
+   - Contours that overlap with known text-based issues are filtered out to prevent double-reporting.
+   - Significant remaining discrepancies are flagged as GEOMETRIC_DIFFERENCE (capturing missing geometry, broken leader lines, borders, etc.).
+
+Color Coding on Bounding Boxes:
+- Red: MISSING_ANNOTATION
+- Blue: TEXT_MISPLACEMENT (with a line connecting the original and new location)
+- Orange: TEXT_OVERLAP
+- Magenta: GEOMETRIC_DIFFERENCE
