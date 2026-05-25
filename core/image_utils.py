@@ -173,31 +173,47 @@ def create_comparison_image(
         color = color_map.get(category, (128, 128, 128))
         
         review_bbox = issue.get("review_bbox")
+        review_polygon = issue.get("review_polygon")
+        review_polygon2 = issue.get("review_polygon2")
 
         def to_review_pixel(x, y):
             px = x * scale_review
             py = scaled_label_bar_h + y * scale_review
             return px, py
 
-        if review_bbox:
+        # Determine label text
+        if category == "MISSING_ANNOTATION":
+            label_text = f"#{idx} MISSING"
+        elif category == "TEXT_MISPLACEMENT":
+            label_text = f"#{idx} MISPLACED"
+        elif category == "TEXT_OVERLAP":
+            label_text = f"#{idx} OVERLAP"
+        elif category == "GEOMETRIC_DIFFERENCE":
+            label_text = f"#{idx} DIFF"
+        else:
+            label_text = f"#{idx} {category}"
+
+        if review_polygon:
+            # Draw oriented polygon(s)
+            scaled_pts = [to_review_pixel(pt[0], pt[1]) for pt in review_polygon]
+            draw.line(scaled_pts + [scaled_pts[0]], fill=color, width=box_width)
+            
+            if review_polygon2:
+                scaled_pts2 = [to_review_pixel(pt[0], pt[1]) for pt in review_polygon2]
+                draw.line(scaled_pts2 + [scaled_pts2[0]], fill=color, width=box_width)
+                
+            # Place label at min x, min y of the first polygon
+            xs = [pt[0] for pt in scaled_pts]
+            ys = [pt[1] for pt in scaled_pts]
+            min_x = min(xs)
+            min_y = min(ys)
+            draw.text((min_x, max(scaled_label_bar_h, min_y - int(20 * scale_factor))), label_text, fill=color, font=label_font)
+        elif review_bbox:
             cx0, cy0 = to_review_pixel(review_bbox[0], review_bbox[1])
             cx1, cy1 = to_review_pixel(review_bbox[2], review_bbox[3])
             
             # Draw issue box on Creo target
             draw.rectangle([cx0, cy0, cx1, cy1], outline=color, width=box_width)
-            
-            # Label text
-            if category == "MISSING_ANNOTATION":
-                label_text = f"#{idx} MISSING"
-            elif category == "TEXT_MISPLACEMENT":
-                label_text = f"#{idx} MISPLACED"
-            elif category == "TEXT_OVERLAP":
-                label_text = f"#{idx} OVERLAP"
-            elif category == "GEOMETRIC_DIFFERENCE":
-                label_text = f"#{idx} DIFF"
-            else:
-                label_text = f"#{idx} {category}"
-                
             draw.text((cx0, max(scaled_label_bar_h, cy0 - int(20 * scale_factor))), label_text, fill=color, font=label_font)
 
     return _image_to_bytes(combined)

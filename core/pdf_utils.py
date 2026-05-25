@@ -68,9 +68,10 @@ def extract_pdf_text_elements(pdf_path: str) -> list[list[dict]]:
         # Get page dictionary containing blocks, lines, spans
         text_dict = page.get_text("dict")
         
-        for block in text_dict.get("blocks", []):
+        for block_idx, block in enumerate(text_dict.get("blocks", [])):
             if "lines" in block:
-                for line in block["lines"]:
+                for line_idx, line in enumerate(block["lines"]):
+                    line_dir = line.get("dir", (1.0, 0.0))
                     for span in line["spans"]:
                         text_str = span["text"].strip()
                         if not text_str:
@@ -80,12 +81,30 @@ def extract_pdf_text_elements(pdf_path: str) -> list[list[dict]]:
                         rect = fitz.Rect(span["bbox"])
                         rect = rect * rot_mat
                         
+                        # Rotate origin using rotation matrix
+                        origin_pt = fitz.Point(span["origin"]) * rot_mat
+                        
+                        # Rotate line direction vector using rotation matrix (translation ignored)
+                        v_mat = fitz.Matrix(rot_mat.a, rot_mat.b, rot_mat.c, rot_mat.d, 0, 0)
+                        dir_pt = fitz.Point(line_dir) * v_mat
+                        mag = (dir_pt.x**2 + dir_pt.y**2)**0.5
+                        if mag > 0:
+                            rot_dir = (dir_pt.x / mag, dir_pt.y / mag)
+                        else:
+                            rot_dir = (1.0, 0.0)
+                        
                         # Span details
                         page_text_elements.append({
                             "text": text_str,
                             "bbox": (rect.x0, rect.y0, rect.x1, rect.y1),  # (x0, y0, x1, y1)
                             "font": span["font"],
-                            "size": span["size"]
+                            "size": span["size"],
+                            "origin": (origin_pt.x, origin_pt.y),
+                            "dir": rot_dir,
+                            "ascender": span.get("ascender", 0.8),
+                            "descender": span.get("descender", -0.2),
+                            "block_idx": block_idx,
+                            "line_idx": line_idx
                         })
         
         all_pages_text.append(page_text_elements)

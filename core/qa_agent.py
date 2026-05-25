@@ -146,6 +146,92 @@ def boxes_overlap(b1: list[float], b2: list[float], threshold: float = 0.15) -> 
             return True
     return False
 
+def get_text_element_polygon(el: dict, padding: float = 0.0) -> list[tuple[float, float]]:
+    """
+    Reconstructs the 4-vertex Oriented Bounding Box (OBB) polygon of a text element
+    using its origin, direction, size, and font ascender/descender metrics.
+    If these fields are missing, falls back to the axis-aligned bounding box.
+    """
+    bbox = el["bbox"]
+    if "origin" in el and "dir" in el and "size" in el:
+        ox, oy = el["origin"]
+        dx, dy = el["dir"]
+        size = el["size"]
+        asc = el.get("ascender", 0.8)
+        desc = el.get("descender", -0.2)
+        x0, y0, x1, y1 = bbox
+        
+        H = (asc - desc) * size
+        if abs(dx) > abs(dy):
+            W = ((x1 - x0) - H * abs(dy)) / abs(dx)
+        else:
+            W = ((y1 - y0) - H * abs(dx)) / abs(dy)
+        W = max(1.0, W)
+        
+        # Apply padding if requested (shrinks/pads OBB)
+        if padding > 0.0:
+            ox += padding * dx
+            W = max(1.0, W - 2 * padding)
+            asc = max(0.0, asc - padding / size)
+            desc = min(0.0, desc + padding / size)
+            
+        u = (dx, dy)
+        v = (dy, -dx)
+        
+        c1 = (ox + desc * size * v[0], oy + desc * size * v[1])
+        c2 = (ox + asc * size * v[0], oy + asc * size * v[1])
+        c3 = (c2[0] + W * u[0], c2[1] + W * u[1])
+        c4 = (c1[0] + W * u[0], c1[1] + W * u[1])
+        return [c1, c2, c3, c4]
+    else:
+        x0, y0, x1, y1 = bbox
+        if padding > 0.0:
+            x0 += padding
+            y0 += padding
+            x1 -= padding
+            y1 -= padding
+            if x0 > x1: x0 = x1 = (x0 + x1) / 2
+            if y0 > y1: y0 = y1 = (y0 + y1) / 2
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+def polygons_overlap(poly1: list[tuple[float, float]], poly2: list[tuple[float, float]], margin: float = 0.0) -> bool:
+    """
+    Checks if two convex polygons overlap using the Separating Axis Theorem (SAT).
+    If margin > 0, requires the overlap to be strictly greater than margin.
+    """
+    def get_normals(poly):
+        normals = []
+        n = len(poly)
+        if n < 2:
+            return normals
+        limit = 1 if n == 2 else n
+        for i in range(limit):
+            p1 = poly[i]
+            p2 = poly[(i + 1) % n]
+            dx = p2[0] - p1[0]
+            dy = p2[1] - p1[1]
+            length = (dx*dx + dy*dy)**0.5
+            if length > 1e-8:
+                normals.append((-dy / length, dx / length))
+        return normals
+
+    axes = get_normals(poly1) + get_normals(poly2)
+    for axis in axes:
+        # Project poly1
+        proj1 = [p[0]*axis[0] + p[1]*axis[1] for p in poly1]
+        min1, max1 = min(proj1), max(proj1)
+        
+        # Project poly2
+        proj2 = [p[0]*axis[0] + p[1]*axis[1] for p in poly2]
+        min2, max2 = min(proj2), max(proj2)
+        
+        # Check for gap
+        overlap = min(max1, max2) - max(min1, min2)
+        if overlap <= margin:
+            return False
+            
+    return True
+
 def check_bbox_overlap_any(bbox: list[float], target_list: list[dict]) -> bool:
     """Helper to check if a bbox overlaps with any bbox in the target_list of issues."""
     for issue in target_list:
@@ -554,10 +640,13 @@ def compare_text_elements(
                     "reference_has": f"'{ref_text}' at { [round(v, 1) for v in ref_bbox] }",
                     "creo_shows": f"'{ref_text}' at { [round(v, 1) for v in rev_el['bbox']] }",
                     "ref_bbox": ref_bbox,
-                    "review_bbox": rev_el["bbox"]
+                    "review_bbox": rev_el["bbox"],
+                    "review_polygon": get_text_element_polygon(rev_el)
                 })
         else:
             # Missing in Creo
+            poly_ref = get_text_element_polygon(ref)
+            poly_rev = [alignment.map_ref_to_review_pdf(vx, vy) for vx, vy in poly_ref]
             issues.append({
                 "type": "MISSING_ANNOTATION",
                 "severity": "HIGH",
@@ -566,18 +655,52 @@ def compare_text_elements(
                 "reference_has": f"'{ref_text}'",
                 "creo_shows": "Missing",
                 "ref_bbox": ref_bbox,
-                "review_bbox": alignment.map_bbox_ref_to_review_pdf(ref_bbox)
+                "review_bbox": alignment.map_bbox_ref_to_review_pdf(ref_bbox),
+                "review_polygon": poly_rev
             })
 
     # 2. Check for overlapping annotations in Creo elements (text-to-text)
     for i, rev1 in enumerate(review_elements):
-        b1 = rev1["bbox"]
+        poly1 = get_text_element_polygon(rev1)
         for j, rev2 in enumerate(review_elements):
             if i >= j:
                 continue
-            b2 = rev2["bbox"]
+            
+            # Skip checking overlap if they belong to the same block in the PDF representation
+            if rev1.get("block_idx") is not None and rev1.get("block_idx") == rev2.get("block_idx"):
+                continue
 
-            if boxes_overlap(b1, b2, threshold=0.15):
+            # Skip checking overlap if they are parallel and extremely close (part of same tolerance stack/dimension in different blocks)
+            dx1, dy1 = rev1.get("dir", (1.0, 0.0))
+            dx2, dy2 = rev2.get("dir", (1.0, 0.0))
+            dot_product = dx1 * dx2 + dy1 * dy2
+            if abs(dot_product) > 0.98:
+                ax, ay = (dx1 + dx2) / 2.0, (dy1 + dy2) / 2.0
+                mag = (ax**2 + ay**2)**0.5
+                if mag > 0:
+                    ax, ay = ax / mag, ay / mag
+                else:
+                    ax, ay = 1.0, 0.0
+                px, py = ay, -ax
+                
+                b1 = rev1["bbox"]
+                b2 = rev2["bbox"]
+                ox1, oy1 = rev1.get("origin", ((b1[0]+b1[2])/2, (b1[1]+b1[3])/2))
+                ox2, oy2 = rev2.get("origin", ((b2[0]+b2[2])/2, (b2[1]+b2[3])/2))
+                
+                perp_dist = abs((ox1 - ox2) * px + (oy1 - oy2) * py)
+                max_size = max(rev1.get("size", 10.0), rev2.get("size", 10.0))
+                if perp_dist < 1.2 * max_size:
+                    dir_dist = abs((ox1 - ox2) * ax + (oy1 - oy2) * ay)
+                    if dir_dist > 0.1 * max_size:
+                        continue
+
+            poly2 = get_text_element_polygon(rev2)
+
+            # Use SAT to check if they overlap with a small margin of 1.0 point
+            if polygons_overlap(poly1, poly2, margin=1.0):
+                b1 = rev1["bbox"]
+                b2 = rev2["bbox"]
                 center = ((b1[0] + b1[2]) / 2.0, (b1[1] + b1[3]) / 2.0)
                 issues.append({
                     "type": "TEXT_OVERLAP",
@@ -587,7 +710,9 @@ def compare_text_elements(
                     "reference_has": "Separate, legible labels",
                     "creo_shows": f"Overlapping labels '{rev1['text']}' and '{rev2['text']}'",
                     "ref_bbox": None,
-                    "review_bbox": [min(b1[0], b2[0]), min(b1[1], b2[1]), max(b1[2], b2[2]), max(b1[3], b2[3])]
+                    "review_bbox": [min(b1[0], b2[0]), min(b1[1], b2[1]), max(b1[2], b2[2]), max(b1[3], b2[3])],
+                    "review_polygon": poly1,
+                    "review_polygon2": poly2
                 })
 
     # 3. Check for text-to-geometry overlaps
@@ -632,10 +757,14 @@ def compare_text_elements(
             for cell in span_cells:
                 if cell in grid:
                     candidate_lines.update(grid[cell])
+            
+            # Reconstruct the oriented polygon for the text, shrunk by padding
+            poly_text = get_text_element_polygon(rev, padding=padding)
                     
             intersected = False
             for p1, p2 in candidate_lines:
-                if line_intersects_rect(p1, p2, shrunk_b):
+                # Precise intersection check using SAT
+                if polygons_overlap(poly_text, [p1, p2]):
                     intersected = True
                     break
                     
@@ -652,7 +781,8 @@ def compare_text_elements(
                     "reference_has": "Clear label/dimension spacing",
                     "creo_shows": f"Overlap between text '{rev['text']}' and drawing vector geometry",
                     "ref_bbox": None,
-                    "review_bbox": list(b)
+                    "review_bbox": list(b),
+                    "review_polygon": get_text_element_polygon(rev)
                 })
 
     return issues
