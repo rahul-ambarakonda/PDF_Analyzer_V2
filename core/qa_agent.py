@@ -775,7 +775,7 @@ def detect_geometric_differences(
             ty1 = min(img_rev_h - 1, int(eb[3] * (img_rev_h / review_pdf_h)) + text_pad)
             cv2.rectangle(text_region_mask, (tx0, ty0), (tx1, ty1), 255, -1)
 
-    geo_issues = []
+    raw_geo_issues = []
 
     for c in contours:
         area = cv2.contourArea(c)
@@ -805,7 +805,7 @@ def detect_geometric_differences(
         center_x = (rx0 + rx1) / 2.0
         center_y = (ry0 + ry1) / 2.0
 
-        geo_issues.append({
+        raw_geo_issues.append({
             "type": "GEOMETRIC_DIFFERENCE",
             "severity": "HIGH",
             "location": f"Near coordinates ({int(center_x)}, {int(center_y)})",
@@ -816,7 +816,98 @@ def detect_geometric_differences(
             "review_bbox": bbox_points
         })
 
-    return geo_issues
+    # 5. Coalesce numerous minor geometric differences inside views or globally
+    view_diffs = {idx: [] for idx in range(len(alignment.view_alignments))}
+    outside_diffs = []
+    
+    for issue in raw_geo_issues:
+        review_bbox = issue["review_bbox"]
+        cx = (review_bbox[0] + review_bbox[2]) / 2.0
+        cy = (review_bbox[1] + review_bbox[3]) / 2.0
+        
+        best_view_idx = -1
+        for idx, val in enumerate(alignment.view_alignments):
+            vx0, vy0, vx1, vy1 = val["bbox_pdf"]
+            corners = [(vx0, vy0), (vx1, vy0), (vx1, vy1), (vx0, vy1)]
+            M = val["M_pdf"] if val["M_pdf"] is not None else alignment.global_M_pdf
+            if M is not None:
+                mapped_corners = []
+                for cx_ref, cy_ref in corners:
+                    rx = M[0, 0] * cx_ref + M[0, 1] * cy_ref + M[0, 2]
+                    ry = M[1, 0] * cx_ref + M[1, 1] * cy_ref + M[1, 2]
+                    mapped_corners.append((rx, ry))
+                xs = [c[0] for c in mapped_corners]
+                ys = [c[1] for c in mapped_corners]
+                rx0, ry0, rx1, ry1 = min(xs), min(ys), max(xs), max(ys)
+                if rx0 - 5 <= cx <= rx1 + 5 and ry0 - 5 <= cy <= ry1 + 5:
+                    best_view_idx = idx
+                    break
+                    
+        if best_view_idx != -1:
+            view_diffs[best_view_idx].append(issue)
+        else:
+            outside_diffs.append(issue)
+            
+    final_geo_issues = []
+    for idx, issues_in_view in view_diffs.items():
+        if len(issues_in_view) > 15:
+            # Coalesce into a single drawing view mismatch issue
+            xs = []
+            ys = []
+            total_area = 0
+            for iss in issues_in_view:
+                import re
+                match = re.search(r'area:\s*(\d+)px', iss["description"])
+                area_val = int(match.group(1)) if match else 10
+                total_area += area_val
+                
+                rb = iss["review_bbox"]
+                xs.extend([rb[0], rb[2]])
+                ys.extend([rb[1], rb[3]])
+                
+            rx0, ry0, rx1, ry1 = min(xs), min(ys), max(xs), max(ys)
+            
+            val = alignment.view_alignments[idx]
+            final_geo_issues.append({
+                "type": "GEOMETRIC_DIFFERENCE",
+                "severity": "MEDIUM",
+                "location": f"Drawing View {idx+1}",
+                "description": f"CAD platform rendering style/projection variations detected in View {idx+1} (coalesced {len(issues_in_view)} cosmetic differences, total area: {total_area}px).",
+                "reference_has": "Reference drawing geometry/projection",
+                "creo_shows": "Creo drawing geometry/projection with cosmetic line variations",
+                "ref_bbox": val["bbox_pdf"],
+                "review_bbox": [rx0, ry0, rx1, ry1]
+            })
+        else:
+            final_geo_issues.extend(issues_in_view)
+            
+    if len(outside_diffs) > 30:
+        xs = []
+        ys = []
+        total_area = 0
+        for iss in outside_diffs:
+            rb = iss["review_bbox"]
+            xs.extend([rb[0], rb[2]])
+            ys.extend([rb[1], rb[3]])
+            import re
+            match = re.search(r'area:\s*(\d+)px', iss["description"])
+            total_area += int(match.group(1)) if match else 10
+            
+        rx0, ry0, rx1, ry1 = min(xs), min(ys), max(xs), max(ys)
+        final_geo_issues.append({
+            "type": "GEOMETRIC_DIFFERENCE",
+            "severity": "LOW",
+            "location": "Global Sheet",
+            "description": f"Systemic visual style/border variations detected across sheet frame (coalesced {len(outside_diffs)} cosmetic differences, total area: {total_area}px). Likely due to template or title borders.",
+            "reference_has": "Reference sheet border",
+            "creo_shows": "Creo sheet border variations",
+            "ref_bbox": None,
+            "review_bbox": [rx0, ry0, rx1, ry1]
+        })
+    else:
+        final_geo_issues.extend(outside_diffs)
+
+    return final_geo_issues
 
 CATEGORIES_LIST = [
     "Drawing Layout",
