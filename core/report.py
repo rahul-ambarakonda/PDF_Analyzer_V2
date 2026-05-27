@@ -53,6 +53,66 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       --category-geom: #d946ef;         /* Magenta */
     }
 
+    html[data-theme="light"] {
+      --bg-color: #f4f7fb;
+      --panel-bg: #ffffff;
+      --panel-border: #d8e0ee;
+      --text-main: #0f172a;
+      --text-muted: #475569;
+      --primary: #4338ca;
+      --primary-glow: rgba(67, 56, 202, 0.14);
+      --color-high-bg: rgba(239, 68, 68, 0.12);
+      --color-medium-bg: rgba(245, 158, 11, 0.12);
+      --color-low-bg: rgba(59, 130, 246, 0.12);
+      --color-clean-bg: rgba(16, 185, 129, 0.12);
+    }
+
+    html[data-theme="light"] header {
+      background: linear-gradient(135deg, #1e1b4b 0%, #141b2d 100%);
+    }
+
+    html[data-theme="light"] header h1 {
+      background: none;
+      color: #ffffff;
+      -webkit-text-fill-color: #ffffff;
+    }
+
+    html[data-theme="light"] header p,
+    html[data-theme="light"] header .meta-grid,
+    html[data-theme="light"] header .meta-item strong {
+      color: rgba(255, 255, 255, 0.82);
+    }
+
+    html[data-theme="light"] .header-actions {
+      border-top-color: rgba(255, 255, 255, 0.08);
+    }
+
+    html[data-theme="light"] .section-title {
+      color: #1e293b;
+    }
+
+    html[data-theme="light"] .summary-text {
+      background-color: #f8fafc;
+      border-color: #dbe4f0;
+      color: #334155;
+    }
+
+    html[data-theme="light"] .category-card {
+      background-color: #ffffff;
+    }
+
+    html[data-theme="light"] .category-card:hover {
+      background-color: #f8fafc;
+    }
+
+    html[data-theme="light"] .category-card-details {
+      border-top-color: #e2e8f0;
+    }
+
+    html[data-theme="light"] .category-card-details li {
+      color: #334155;
+    }
+
     * {
       box-sizing: border-box;
       margin: 0;
@@ -65,6 +125,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       color: var(--text-main);
       padding: 40px 24px;
       line-height: 1.5;
+      transition: background-color 0.2s ease, color 0.2s ease;
     }
 
     .container {
@@ -115,13 +176,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       font-weight: 400;
     }
 
+    .header-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
     header .meta-grid {
       display: flex;
       flex-wrap: wrap;
       gap: 24px;
-      margin-top: 20px;
-      padding-top: 20px;
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
       font-size: 0.875rem;
       color: var(--text-muted);
     }
@@ -152,6 +221,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       text-align: center;
       transition: transform 0.3s ease, box-shadow 0.3s ease;
       box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    html[data-theme="light"] .stat-card,
+    html[data-theme="light"] .audit-summary-panel,
+    html[data-theme="light"] .page-section,
+    html[data-theme="light"] .category-card,
+    html[data-theme="light"] header {
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
     }
 
     .stat-card:hover {
@@ -298,10 +375,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     /* Target Image Container */
     .comparison-container {
       position: relative;
-      background-color: #1a2235;
+      background-color: rgba(26, 34, 53, 0.98);
       padding: 10px;
       border-bottom: 1px solid var(--panel-border);
       overflow: hidden;
+    }
+
+    html[data-theme="light"] .comparison-container {
+      background-color: #eef2ff;
     }
 
     .comparison-img {
@@ -357,6 +438,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     .category-card.failed {
       border-left: 5px solid var(--color-high);
       background-color: rgba(239, 68, 68, 0.01);
+    }
+
+    .category-card.failed .category-card-details {
+      display: block;
     }
 
     .category-card-header {
@@ -427,6 +512,90 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       align-items: center;
       gap: 8px;
     }
+
+    .download-btn {
+      appearance: none;
+      border: 1px solid rgba(99, 102, 241, 0.45);
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      color: #fff;
+      border-radius: 999px;
+      padding: 12px 18px;
+      font-weight: 700;
+      font-size: 0.92rem;
+      cursor: pointer;
+      box-shadow: 0 10px 24px rgba(79, 70, 229, 0.28);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+    }
+
+    .download-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 14px 28px rgba(79, 70, 229, 0.34);
+    }
+
+    .download-btn:active {
+      transform: translateY(0);
+      opacity: 0.92;
+    }
+
+    .download-btn:disabled {
+      cursor: wait;
+      opacity: 0.7;
+    }
+
+    .download-note {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+    }
+
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--panel-border);
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-main);
+      border-radius: 999px;
+      padding: 11px 16px;
+      font-weight: 700;
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .theme-toggle:hover {
+      transform: translateY(-1px);
+      background: rgba(99, 102, 241, 0.1);
+    }
+
+    html[data-theme="light"] .theme-toggle {
+      background: #eef2ff;
+    }
+
+    .pdf-status {
+      color: #c7d2fe;
+      font-size: 0.82rem;
+      min-height: 1em;
+    }
+
+    html[data-theme="light"] .pdf-status {
+      color: #4f46e5;
+    }
+
+    .pdf-exporting .header-actions,
+    .pdf-exporting .download-btn,
+    .pdf-exporting .download-note,
+    .pdf-exporting .pdf-status {
+      display: none !important;
+    }
+
+    @media print {
+      .header-actions,
+      .download-btn,
+      .download-note,
+      .pdf-status {
+        display: none !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -440,6 +609,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="meta-item">📅 Generated: <strong>{{ generated_at }}</strong></div>
         <div class="meta-item">📄 Total Pages Analyzed: <strong>{{ total_pages }}</strong></div>
         <div class="meta-item">⚠️ Total Issues Flagged: <strong>{{ total_issues }}</strong></div>
+      </div>
+      
+      <div class="header-actions">
+        <div class="download-note">Download a PDF copy of this report from the current page.</div>
+        <div>
+          <button id="themeToggleBtn" class="theme-toggle" type="button">Toggle Light/Dark</button>
+          <button id="downloadPdfBtn" class="download-btn" type="button">Download PDF</button>
+          <div id="pdfStatus" class="pdf-status" aria-live="polite"></div>
+        </div>
       </div>
     </header>
 
@@ -522,20 +700,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <!-- Collapsible Category Grid -->
         <div class="categories-grid">
           {% for cat in page.categories_report %}
-          <div class="category-card {{ 'failed' if cat.status == 'FAIL' else 'passed' }}" onclick="toggleDetails(this)">
+          <div class="category-card {{ 'failed' if cat.status == 'FAIL' else 'passed' }} {{ 'expanded' if cat.status == 'FAIL' else '' }}" onclick="toggleDetails(this)">
             <div class="category-card-header">
               <span class="category-card-name">{{ cat.name }}</span>
               <span class="category-card-status {{ 'failed' if cat.status == 'FAIL' else 'passed' }}">{{ cat.status }}</span>
             </div>
             {% if cat.issues %}
-            <div class="category-card-details">
+            <div class="category-card-details" style="display: {{ 'block' if cat.status == 'FAIL' else 'none' }};">
               <ul>
                 {% for issue_desc in cat.issues %}
                 <li>{{ issue_desc }}</li>
                 {% endfor %}
               </ul>
             </div>
-            <span class="click-hint">Click to show details</span>
+            <span class="click-hint">{{ 'Click to hide details' if cat.status == 'FAIL' else 'Click to show details' }}</span>
             {% endif %}
           </div>
           {% endfor %}
@@ -552,18 +730,147 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <script>
+    const storageKey = 'pdf-report-theme';
+
     function toggleDetails(card) {
       const details = card.querySelector('.category-card-details');
       const hint = card.querySelector('.click-hint');
-      if (details) {
-        const isVisible = details.style.display === 'block';
-        details.style.display = isVisible ? 'none' : 'block';
-        if (hint) {
-          hint.innerText = isVisible ? 'Click to show details' : 'Click to hide details';
-        }
+      if (!details) return;
+
+      const isVisible = details.style.display === 'block';
+      details.style.display = isVisible ? 'none' : 'block';
+      card.classList.toggle('expanded', !isVisible);
+      if (hint) {
+        hint.innerText = isVisible ? 'Click to show details' : 'Click to hide details';
       }
     }
+
+    function syncFailedCards(root) {
+      root.querySelectorAll('.category-card.failed').forEach((card) => {
+        const details = card.querySelector('.category-card-details');
+        const hint = card.querySelector('.click-hint');
+        if (details) {
+          details.style.display = 'block';
+        }
+        card.classList.add('expanded');
+        if (hint) {
+          hint.innerText = 'Click to hide details';
+        }
+      });
+    }
+
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      const themeBtn = document.getElementById('themeToggleBtn');
+      if (themeBtn) {
+        themeBtn.textContent = theme === 'light' ? 'Switch to Dark' : 'Switch to Light';
+      }
+      localStorage.setItem(storageKey, theme);
+    }
+
+    function getPreferredTheme() {
+      return 'dark';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const root = document.querySelector('.container');
+      const themeBtn = document.getElementById('themeToggleBtn');
+      const downloadBtn = document.getElementById('downloadPdfBtn');
+      const pdfStatus = document.getElementById('pdfStatus');
+
+      applyTheme(getPreferredTheme());
+      if (root) {
+        syncFailedCards(root);
+      }
+
+      if (themeBtn) {
+        themeBtn.addEventListener('click', () => {
+          const nextTheme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+          applyTheme(nextTheme);
+        });
+      }
+
+      if (downloadBtn) {
+        downloadBtn.addEventListener('click', async () => {
+          const reportRoot = document.querySelector('.container');
+          if (!reportRoot) {
+            if (pdfStatus) {
+              pdfStatus.textContent = 'PDF export is unavailable in this browser.';
+            }
+            return;
+          }
+
+          if (typeof html2pdf === 'undefined') {
+            if (pdfStatus) {
+              pdfStatus.textContent = 'PDF library did not load. Opening print dialog instead.';
+            }
+            window.print();
+            return;
+          }
+
+          reportRoot.classList.add('pdf-exporting');
+          syncFailedCards(reportRoot);
+          downloadBtn.disabled = true;
+          if (pdfStatus) {
+            pdfStatus.textContent = 'Rendering report for download...';
+          }
+
+          try {
+            await html2pdf().set({
+              margin: 10,
+              filename: 'engineering-drawing-qa-report.pdf',
+              image: { type: 'jpeg', quality: 0.98 },
+              html2canvas: {
+                scale: 2,
+                useCORS: true,
+                allowTaint: true,
+                scrollY: 0,
+                onclone: (clonedDoc) => {
+                  clonedDoc.documentElement.dataset.theme = document.documentElement.dataset.theme || 'dark';
+                  clonedDoc.documentElement.classList.add('pdf-exporting');
+                  const clonedRoot = clonedDoc.querySelector('.container');
+                  if (clonedRoot) {
+                    syncFailedCards(clonedRoot);
+                  }
+                  const clonedBtn = clonedDoc.getElementById('downloadPdfBtn');
+                  const clonedStatus = clonedDoc.getElementById('pdfStatus');
+                  const clonedNote = clonedDoc.querySelector('.download-note');
+                  const clonedTheme = clonedDoc.getElementById('themeToggleBtn');
+                  if (clonedBtn) clonedBtn.remove();
+                  if (clonedStatus) clonedStatus.remove();
+                  if (clonedNote) clonedNote.remove();
+                  if (clonedTheme) clonedTheme.remove();
+                }
+              },
+              jsPDF: {
+                unit: 'mm',
+                format: 'a4',
+                orientation: 'portrait'
+              }
+            }).from(reportRoot).save();
+
+            if (pdfStatus) {
+              pdfStatus.textContent = 'PDF download started.';
+            }
+          } catch (error) {
+            console.error('PDF export failed:', error);
+            if (pdfStatus) {
+              pdfStatus.textContent = 'PDF export failed. Please try again.';
+            }
+          } finally {
+            downloadBtn.disabled = false;
+            reportRoot.classList.remove('pdf-exporting');
+            setTimeout(() => {
+              if (pdfStatus && pdfStatus.textContent === 'PDF download started.') {
+                pdfStatus.textContent = '';
+              }
+            }, 3000);
+          }
+        });
+      }
+    });
   </script>
 </body>
 </html>
