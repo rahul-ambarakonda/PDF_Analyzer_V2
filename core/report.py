@@ -939,10 +939,26 @@ def generate_report(results: list[dict], output_path: str = "output/report.html"
                 global_categories[cat["name"]]["failed_count"] += 1
                 global_categories[cat["name"]]["status"] = "FAIL"
 
-    # Keep image paths relative for web portability
+    # Inline images as base64 to prevent local file CORS / tainted canvas security errors in browser PDF exports
+    import base64
     for r in results:
         if "comparison_image" in r:
-            r["comparison_image"] = f"comparisons/{Path(r['comparison_image']).name}"
+            img_path = Path(r["comparison_image"])
+            inline_success = False
+            # Check candidate locations to find the generated drawing image
+            for path_candidate in [img_path, Path("output") / "comparisons" / img_path.name, Path("output") / img_path.name]:
+                if path_candidate.exists():
+                    try:
+                        img_bytes = path_candidate.read_bytes()
+                        encoded = base64.b64encode(img_bytes).decode("utf-8")
+                        r["comparison_image"] = f"data:image/png;base64,{encoded}"
+                        inline_success = True
+                        break
+                    except Exception:
+                        pass
+            if not inline_success:
+                # Fallback to relative path if files cannot be read
+                r["comparison_image"] = f"comparisons/{img_path.name}"
 
     template = Template(HTML_TEMPLATE)
     html = template.render(
