@@ -54,37 +54,57 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     html[data-theme="light"] {
-      --bg-color: #f4f7fb;
+      --bg-color: #f8fafc;
       --panel-bg: #ffffff;
-      --panel-border: #d8e0ee;
+      --panel-border: #e2e8f0;
       --text-main: #0f172a;
-      --text-muted: #475569;
-      --primary: #4338ca;
-      --primary-glow: rgba(67, 56, 202, 0.14);
-      --color-high-bg: rgba(239, 68, 68, 0.12);
-      --color-medium-bg: rgba(245, 158, 11, 0.12);
-      --color-low-bg: rgba(59, 130, 246, 0.12);
-      --color-clean-bg: rgba(16, 185, 129, 0.12);
+      --text-muted: #64748b;
+      --primary: #4f46e5;
+      --primary-glow: rgba(79, 70, 229, 0.1);
+      
+      --color-high: #dc2626;
+      --color-high-bg: rgba(220, 38, 38, 0.08);
+      
+      --color-medium: #d97706;
+      --color-medium-bg: rgba(217, 119, 6, 0.08);
+      
+      --color-low: #2563eb;
+      --color-low-bg: rgba(37, 99, 235, 0.08);
+      
+      --color-clean: #16a34a;
+      --color-clean-bg: rgba(22, 163, 74, 0.08);
     }
 
     html[data-theme="light"] header {
-      background: linear-gradient(135deg, #1e1b4b 0%, #141b2d 100%);
+      background: linear-gradient(135deg, #e0e7ff 0%, #f8fafc 100%);
+      border-color: #cbd5e1;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
     }
 
     html[data-theme="light"] header h1 {
-      background: none;
-      color: #ffffff;
-      -webkit-text-fill-color: #ffffff;
+      background: linear-gradient(to right, #4f46e5, #7c3aed);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
     }
 
-    html[data-theme="light"] header p,
-    html[data-theme="light"] header .meta-grid,
+    html[data-theme="light"] header p {
+      color: #475569;
+    }
+
+    html[data-theme="light"] header .meta-grid {
+      color: #64748b;
+    }
+
     html[data-theme="light"] header .meta-item strong {
-      color: rgba(255, 255, 255, 0.82);
+      color: #0f172a;
     }
 
     html[data-theme="light"] .header-actions {
-      border-top-color: rgba(255, 255, 255, 0.08);
+      border-top-color: #cbd5e1;
+    }
+
+    html[data-theme="light"] .download-note {
+      color: #64748b;
     }
 
     html[data-theme="light"] .section-title {
@@ -92,8 +112,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     html[data-theme="light"] .summary-text {
-      background-color: #f8fafc;
-      border-color: #dbe4f0;
+      background-color: #f1f5f9;
+      border-color: #cbd5e1;
       color: #334155;
     }
 
@@ -102,7 +122,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     html[data-theme="light"] .category-card:hover {
-      background-color: #f8fafc;
+      background-color: #f1f5f9;
     }
 
     html[data-theme="light"] .category-card-details {
@@ -111,6 +131,28 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     html[data-theme="light"] .category-card-details li {
       color: #334155;
+    }
+
+    html[data-theme="light"] .audit-summary-table td {
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    html[data-theme="light"] .breakdown-title {
+      color: #4f46e5 !important;
+    }
+
+    html[data-theme="light"] .click-hint {
+      color: #94a3b8;
+    }
+
+    html[data-theme="light"] .theme-toggle {
+      background: #f1f5f9;
+      border-color: #cbd5e1;
+      color: #0f172a;
+    }
+
+    html[data-theme="light"] .theme-toggle:hover {
+      background: #e2e8f0;
     }
 
     * {
@@ -695,7 +737,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="summary-text">{{ page.summary }}</div>
         {% endif %}
 
-        <div style="margin-bottom: 12px; font-weight:700; font-size:1rem; color: #a5b4fc;">Audit Categories Breakdown:</div>
+        <div class="breakdown-title" style="margin-bottom: 12px; font-weight:700; font-size:1rem; color: #a5b4fc;">Audit Categories Breakdown:</div>
         
         <!-- Collapsible Category Grid -->
         <div class="categories-grid">
@@ -771,7 +813,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     function getPreferredTheme() {
-      return 'dark';
+      const stored = localStorage.getItem(storageKey);
+      return stored || 'light';
     }
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -828,7 +871,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 allowTaint: true,
                 scrollY: 0,
                 onclone: (clonedDoc) => {
-                  clonedDoc.documentElement.dataset.theme = document.documentElement.dataset.theme || 'dark';
+                  clonedDoc.documentElement.dataset.theme = document.documentElement.dataset.theme || 'light';
                   clonedDoc.documentElement.classList.add('pdf-exporting');
                   const clonedRoot = clonedDoc.querySelector('.container');
                   if (clonedRoot) {
