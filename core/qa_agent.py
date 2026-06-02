@@ -282,6 +282,21 @@ def line_intersects_rect(p1, p2, rect):
 
     return False
 
+def is_valid_transform(M: np.ndarray, expected_scale: float) -> bool:
+    if M is None or M.shape != (2, 3):
+        return False
+    if not np.isfinite(M).all():
+        return False
+    A = M[:, :2]
+    det = np.linalg.det(A)
+    if abs(det) < 1e-5:
+        return False
+    s = np.sqrt(A[0, 0]**2 + A[1, 0]**2)
+    # Check if scale is within reasonable relative bounds
+    if s < 0.05 * expected_scale or s > 20.0 * expected_scale:
+        return False
+    return True
+
 def compute_alignment(
     ref_cv: np.ndarray,
     review_cv: np.ndarray,
@@ -323,7 +338,7 @@ def compute_alignment(
         ty0 = max(0, int(eb[1] * scale_ref_h) - pad)
         tx1 = min(img_ref_w - 1, int(eb[2] * scale_ref_w) + pad)
         ty1 = min(img_ref_h - 1, int(eb[3] * scale_ref_h) + pad)
-        cv2.rectangle(ref_cv_clean, (tx0, ty0), (tx1, ty1), 255, -1)
+        cv2.rectangle(ref_cv_clean, (int(tx0), int(ty0)), (int(tx1), int(ty1)), 255, -1)
 
     rev_cv_clean = review_cv.copy()
     for el in review_text:
@@ -332,7 +347,7 @@ def compute_alignment(
         ty0 = max(0, int(eb[1] * scale_rev_h) - pad)
         tx1 = min(img_rev_w - 1, int(eb[2] * scale_rev_w) + pad)
         ty1 = min(img_rev_h - 1, int(eb[3] * scale_rev_h) + pad)
-        cv2.rectangle(rev_cv_clean, (tx0, ty0), (tx1, ty1), 255, -1)
+        cv2.rectangle(rev_cv_clean, (int(tx0), int(ty0)), (int(tx1), int(ty1)), 255, -1)
 
     # 2. Compute dense SIFT matches between the clean images
     sift = cv2.SIFT_create(nfeatures=20000)
@@ -377,9 +392,9 @@ def compute_alignment(
 
     s_pdf_fallback = review_pdf_w / ref_pdf_w_safe
     s_px_fallback = img_rev_w / img_ref_w
-    if global_M_pdf is None:
+    if global_M_pdf is None or not is_valid_transform(global_M_pdf, s_pdf_fallback):
         global_M_pdf = np.array([[s_pdf_fallback, 0.0, 0.0], [0.0, s_pdf_fallback, 0.0]], dtype=np.float32)
-    if global_M_pixel is None:
+    if global_M_pixel is None or not is_valid_transform(global_M_pixel, s_px_fallback):
         global_M_pixel = np.array([[s_px_fallback, 0.0, 0.0], [0.0, s_px_fallback, 0.0]], dtype=np.float32)
 
     # 3. If ref_text is empty but review_text is not, map review text back to ref_cv_clean
@@ -406,11 +421,14 @@ def compute_alignment(
 
             xs = [c[0] for c in mapped_corners]
             ys = [c[1] for c in mapped_corners]
-            tx0 = max(0, int(min(xs)) - pad)
-            ty0 = max(0, int(min(ys)) - pad)
-            tx1 = min(img_ref_w - 1, int(max(xs)) + pad)
-            ty1 = min(img_ref_h - 1, int(max(ys)) + pad)
-            cv2.rectangle(ref_cv_clean, (tx0, ty0), (tx1, ty1), 255, -1)
+            # Clamp mapped corners to a safe range to prevent overflow in conversion or cv2 operations
+            xs = [max(-100000.0, min(100000.0, x)) for x in xs]
+            ys = [max(-100000.0, min(100000.0, y)) for y in ys]
+            tx0 = max(0, min(img_ref_w - 1, int(min(xs)) - pad))
+            ty0 = max(0, min(img_ref_h - 1, int(min(ys)) - pad))
+            tx1 = max(0, min(img_ref_w - 1, int(max(xs)) + pad))
+            ty1 = max(0, min(img_ref_h - 1, int(max(ys)) + pad))
+            cv2.rectangle(ref_cv_clean, (int(tx0), int(ty0)), (int(tx1), int(ty1)), 255, -1)
 
         # Recompute SIFT on updated ref_cv_clean
         kp1, des1 = sift.detectAndCompute(ref_cv_clean, None)
@@ -443,9 +461,9 @@ def compute_alignment(
             dst_px = np.float32([m[1] for m in all_matches_px]).reshape(-1, 1, 2)
             global_M_pixel, _ = cv2.estimateAffinePartial2D(src_px, dst_px, method=cv2.RANSAC, ransacReprojThreshold=10.0)
 
-        if global_M_pdf is None:
+        if global_M_pdf is None or not is_valid_transform(global_M_pdf, s_pdf_fallback):
             global_M_pdf = np.array([[s_pdf_fallback, 0.0, 0.0], [0.0, s_pdf_fallback, 0.0]], dtype=np.float32)
-        if global_M_pixel is None:
+        if global_M_pixel is None or not is_valid_transform(global_M_pixel, s_px_fallback):
             global_M_pixel = np.array([[s_px_fallback, 0.0, 0.0], [0.0, s_px_fallback, 0.0]], dtype=np.float32)
 
     # 4. Extract unique exact-matching text element centers (if both text collections exist)
@@ -500,7 +518,7 @@ def compute_alignment(
         mx1 = max(bx + bw - margin, 0)
         my1 = max(by + bh - margin, 0)
         if mx1 > mx0 and my1 > my0:
-            cv2.rectangle(mask, (mx0, my0), (mx1, my1), 255, -1)
+            cv2.rectangle(mask, (int(mx0), int(my0)), (int(mx1), int(my1)), 255, -1)
             clean_thresh = cv2.bitwise_and(thresh, mask)
 
     kernel_size = max(10, int(80 * dpi_scale))
@@ -811,7 +829,7 @@ def detect_geometric_differences(
     for val in alignment.view_alignments:
         vx0, vy0, vw, vh = val["bbox_pixel"]
         mask = np.full_like(ref_cv, 255)
-        cv2.rectangle(mask, (vx0, vy0), (vx0 + vw, vy0 + vh), 0, -1)
+        cv2.rectangle(mask, (int(vx0), int(vy0)), (int(vx0 + vw), int(vy0 + vh)), 0, -1)
         dist = cv2.distanceTransform(mask, cv2.DIST_L2, 3)
         dist_maps.append(dist)
         
@@ -883,7 +901,7 @@ def detect_geometric_differences(
         border_margin = int(15 * dpi_scale)
         border_mask = np.zeros_like(review_cv)
         if rx1 - border_margin > rx0 + border_margin and ry1 - border_margin > ry0 + border_margin:
-            cv2.rectangle(border_mask, (rx0 + border_margin, ry0 + border_margin), (rx1 - border_margin, ry1 - border_margin), 255, -1)
+            cv2.rectangle(border_mask, (int(rx0 + border_margin), int(ry0 + border_margin)), (int(rx1 - border_margin), int(ry1 - border_margin)), 255, -1)
 
     thresh = cv2.bitwise_and(thresh, border_mask)
     
@@ -903,7 +921,7 @@ def detect_geometric_differences(
             ty0 = max(0, int(eb[1] * (img_rev_h / review_pdf_h)) - text_pad)
             tx1 = min(img_rev_w - 1, int(eb[2] * (img_rev_w / review_pdf_w)) + text_pad)
             ty1 = min(img_rev_h - 1, int(eb[3] * (img_rev_h / review_pdf_h)) + text_pad)
-            cv2.rectangle(text_region_mask, (tx0, ty0), (tx1, ty1), 255, -1)
+            cv2.rectangle(text_region_mask, (int(tx0), int(ty0)), (int(tx1), int(ty1)), 255, -1)
 
     raw_geo_issues = []
 
