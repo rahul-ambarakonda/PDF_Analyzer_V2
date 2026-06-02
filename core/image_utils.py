@@ -71,6 +71,13 @@ def _load_font(size: int = 14) -> ImageFont.ImageFont:
         
     return ImageFont.load_default()
 
+def boxes_overlap(box1, box2):
+    """
+    Checks if two bounding boxes box1=(x0, y0, x1, y1) and box2=(x0, y0, x1, y1) overlap.
+    """
+    return not (box1[2] < box2[0] or box1[0] > box2[2] or
+                box1[3] < box2[1] or box1[1] > box2[3])
+
 def create_comparison_image(
     ref_bytes: bytes,
     review_bytes: bytes,
@@ -164,6 +171,8 @@ def create_comparison_image(
         "GEOMETRIC_DIFFERENCE": COLOR_GEOMETRIC_DIFFERENCE
     }
 
+    placed_label_boxes = []
+
     # Bounding box font and styling - made thinner as requested
     box_width = max(2, int(2.5 * scale_factor))
     label_font = _load_font(max(14, int(16 * scale_factor)))
@@ -181,20 +190,11 @@ def create_comparison_image(
             py = scaled_label_bar_h + y * scale_review
             return px, py
 
-        # Determine label text
-        if category == "MISSING_ANNOTATION":
-            label_text = f"#{idx} MISSING"
-        elif category == "TEXT_MISPLACEMENT":
-            label_text = f"#{idx} MISPLACED"
-        elif category == "TEXT_OVERLAP":
-            label_text = f"#{idx} OVERLAP"
-        elif category == "GEOMETRIC_DIFFERENCE":
-            label_text = f"#{idx} DIFF"
-        else:
-            label_text = f"#{idx} {category}"
+        # Determine label text (only the index number like #3)
+        label_text = f"#{idx}"
 
+        # Resolve scaled geometry coordinates
         if review_polygon:
-            # Draw oriented polygon(s)
             scaled_pts = [to_review_pixel(pt[0], pt[1]) for pt in review_polygon]
             draw.line(scaled_pts + [scaled_pts[0]], fill=color, width=box_width)
             
@@ -202,18 +202,83 @@ def create_comparison_image(
                 scaled_pts2 = [to_review_pixel(pt[0], pt[1]) for pt in review_polygon2]
                 draw.line(scaled_pts2 + [scaled_pts2[0]], fill=color, width=box_width)
                 
-            # Place label at min x, min y of the first polygon
             xs = [pt[0] for pt in scaled_pts]
             ys = [pt[1] for pt in scaled_pts]
             min_x = min(xs)
+            max_x = max(xs)
             min_y = min(ys)
-            draw.text((min_x, max(scaled_label_bar_h, min_y - int(20 * scale_factor))), label_text, fill=color, font=label_font)
+            max_y = max(ys)
         elif review_bbox:
             cx0, cy0 = to_review_pixel(review_bbox[0], review_bbox[1])
             cx1, cy1 = to_review_pixel(review_bbox[2], review_bbox[3])
-            
-            # Draw issue box on Creo target
             draw.rectangle([cx0, cy0, cx1, cy1], outline=color, width=box_width)
-            draw.text((cx0, max(scaled_label_bar_h, cy0 - int(20 * scale_factor))), label_text, fill=color, font=label_font)
+            min_x = min(cx0, cx1)
+            max_x = max(cx0, cx1)
+            min_y = min(cy0, cy1)
+            max_y = max(cy0, cy1)
+        else:
+            continue
+
+        # Get text size
+        try:
+            bbox = draw.textbbox((0, 0), label_text, font=label_font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+        except AttributeError:
+            text_w, text_h = draw.textsize(label_text, font=label_font)
+
+        gap = int(4 * scale_factor)
+        margin = int(2 * scale_factor)
+
+        # Dynamic search for non-overlapping position
+        found_pos = False
+        label_x, label_y = min_x, min_y - text_h - gap
+
+        # Candidate 1: Stack upwards above min_y
+        for i in range(10):
+            cy = min_y - text_h - gap - i * (text_h + gap)
+            cx = min_x
+            if cy >= scaled_label_bar_h:
+                candidate_box = (cx - margin, cy - margin, cx + text_w + margin, cy + text_h + margin)
+                if not any(boxes_overlap(candidate_box, pb) for pb in placed_label_boxes):
+                    label_x, label_y = cx, cy
+                    found_pos = True
+                    break
+        
+        # Candidate 2: Stack downwards below max_y
+        if not found_pos:
+            for i in range(10):
+                cy = max_y + gap + i * (text_h + gap)
+                cx = min_x
+                if cy + text_h <= total_h - scaled_legend_bar_h:
+                    candidate_box = (cx - margin, cy - margin, cx + text_w + margin, cy + text_h + margin)
+                    if not any(boxes_overlap(candidate_box, pb) for pb in placed_label_boxes):
+                        label_x, label_y = cx, cy
+                        found_pos = True
+                        break
+
+        # Candidate 3: Shift horizontally to the right above min_y
+        if not found_pos:
+            for j in range(1, 5):
+                for i in range(5):
+                    cy = min_y - text_h - gap - i * (text_h + gap)
+                    cx = min_x + j * (text_w + gap * 2)
+                    if cy >= scaled_label_bar_h and cx + text_w <= total_w:
+                        candidate_box = (cx - margin, cy - margin, cx + text_w + margin, cy + text_h + margin)
+                        if not any(boxes_overlap(candidate_box, pb) for pb in placed_label_boxes):
+                            label_x, label_y = cx, cy
+                            found_pos = True
+                            break
+                if found_pos:
+                    break
+
+        # Fallback to default
+        if not found_pos:
+            label_x = min_x
+            label_y = max(scaled_label_bar_h, min_y - text_h - gap)
+
+        # Place label text and record label bounding box
+        draw.text((label_x, label_y), label_text, fill=color, font=label_font)
+        placed_label_boxes.append((label_x - margin, label_y - margin, label_x + text_w + margin, label_y + text_h + margin))
 
     return _image_to_bytes(combined)
