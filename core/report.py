@@ -1023,15 +1023,33 @@ def generate_report(results: list[dict], output_path: str = "output/report.html"
     bad_pages    = sum(1 for r in results if r.get("page_has_issues"))
     ok_pages     = len(results) - bad_pages
 
-    # 1. Map global categories, assign anchors, and calculate drawing quality scores
+    CATEGORY_WEIGHTS = {
+        "Drawing Layout": 10,
+        "Views & Geometry": 15,
+        "Dimensions & Tolerances": 15,
+        "Notes & Annotations": 10,
+        "Title Block": 10,
+        "Revision History": 5,
+        "BOM / Tables": 10,
+        "Symbols & Standards": 5,
+        "Styling & Layers": 5,
+        "Scale & Proportion": 5,
+        "Visual Quality": 5,
+        "Conversion Integrity": 3,
+        "Compliance Rules": 2
+    }
+
+    # 1. Map global categories, assign anchors, and calculate drawing quality scores based on category compliance
     global_categories = {name: {"failed_count": 0, "status": "PASS"} for name in CATEGORIES_LIST}
     for idx, r in enumerate(results):
         r["index"] = idx + 1
-        page_issues = r.get("issues", [])
-        high = sum(1 for i in page_issues if i.get("severity") == "HIGH")
-        medium = sum(1 for i in page_issues if i.get("severity") == "MEDIUM")
-        low = sum(1 for i in page_issues if i.get("severity") == "LOW")
-        r["score"] = max(0, 100 - (high * 10 + medium * 5 + low * 2))
+        
+        # Calculate category-weighted quality score out of 100
+        score = 100
+        for cat in r.get("categories_report", []):
+            if cat["status"] == "FAIL":
+                score -= CATEGORY_WEIGHTS.get(cat["name"], 0)
+        r["score"] = max(0, score)
 
         for cat in r.get("categories_report", []):
             if cat["status"] == "FAIL":
