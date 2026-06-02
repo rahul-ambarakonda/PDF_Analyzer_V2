@@ -1055,6 +1055,23 @@ CATEGORIES_LIST = [
     "Compliance Rules"
 ]
 
+CATEGORY_WEIGHTS = {
+    "Drawing Layout": 10,
+    "Views & Geometry": 15,
+    "Dimensions & Tolerances": 15,
+    "Notes & Annotations": 10,
+    "Title Block": 10,
+    "Revision History": 5,
+    "BOM / Tables": 10,
+    "Symbols & Standards": 5,
+    "Styling & Layers": 5,
+    "Scale & Proportion": 5,
+    "Visual Quality": 5,
+    "Conversion Integrity": 3,
+    "Compliance Rules": 2
+}
+
+
 def classify_issue(issue: dict, page_w: float, page_h: float) -> str:
     category = "Visual Quality"  # default
     issue_type = issue.get("type")
@@ -1232,6 +1249,13 @@ def analyze_page(
         "failed": failed_checks
     }
 
+    # Calculate category-weighted quality score out of 100
+    score = 100
+    for cat in categories_report:
+        if cat["status"] == "FAIL":
+            score -= CATEGORY_WEIGHTS.get(cat["name"], 0)
+    score = max(0, score)
+
     if page_has_issues:
         summary = (
             f"Page {page_num} has {len(all_issues)} identified discrepancies. "
@@ -1246,7 +1270,9 @@ def analyze_page(
         "issues": all_issues,
         "summary": summary,
         "status": page_status,
+        "score": score,
         "summary_counts": summary_counts,
         "categories_report": categories_report
     }
+
 

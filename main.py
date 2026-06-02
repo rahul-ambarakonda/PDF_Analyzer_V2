@@ -14,7 +14,7 @@ from pathlib import Path
 from PIL import Image
 from core.pdf_utils import pdf_to_images, extract_pdf_text_elements, extract_pdf_drawings
 from core.image_utils import create_comparison_image
-from core.qa_agent import analyze_page, CATEGORIES_LIST
+from core.qa_agent import analyze_page, CATEGORIES_LIST, CATEGORY_WEIGHTS
 from core.report import generate_report
 from config import (
     PDF_DPI,
@@ -238,9 +238,16 @@ def main(ref, review, dpi, out):
                     "issues": cat_issues
                 })
 
+            doc_score = 100
+            for cat in categories_list_json:
+                if cat["status"] == "FAIL":
+                    doc_score -= CATEGORY_WEIGHTS.get(cat["name"], 0)
+            doc_score = max(0, doc_score)
+
             doc_report = {
                 "drawing_id": review_file.stem,
                 "status": doc_status,
+                "score": doc_score,
                 "summary": {
                     "total_checks": doc_total_checks,
                     "passed": doc_passed_checks,
@@ -251,6 +258,7 @@ def main(ref, review, dpi, out):
                     {
                         "page_num": pr["page"],
                         "status": pr["status"],
+                        "score": pr["score"],
                         "summary": pr["summary_counts"],
                         "categories": pr["categories_report"]
                     } for pr in document_pages_results
@@ -284,6 +292,8 @@ def main(ref, review, dpi, out):
 def _print_page_summary(result: dict):
     """Print issues summary on the terminal."""
     issues = result.get("issues", [])
+    score = result.get("score", 100)
+    console.print(f"    [bold cyan]Quality Score: {score}/100[/bold cyan]")
     if result.get("page_has_issues"):
         console.print(f"    [red]Warning: {len(issues)} issue(s) identified[/red]")
         for idx, issue in enumerate(issues, start=1):
