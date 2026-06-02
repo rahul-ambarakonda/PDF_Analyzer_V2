@@ -546,6 +546,55 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       font-style: italic;
     }
 
+    .score-badge {
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 6px 14px;
+      border-radius: 50px;
+      letter-spacing: 0.5px;
+      display: inline-flex;
+      align-items: center;
+    }
+    .score-badge.good {
+      background-color: rgba(16, 185, 129, 0.1);
+      color: #10b981;
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+    .score-badge.avg {
+      background-color: rgba(245, 158, 11, 0.1);
+      color: #f59e0b;
+      border: 1px solid rgba(245, 158, 11, 0.2);
+    }
+    .score-badge.poor {
+      background-color: rgba(239, 68, 68, 0.1);
+      color: #ef4444;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+    }
+
+    html[data-theme="light"] .score-badge.good {
+      background-color: rgba(22, 163, 74, 0.08);
+      color: #16a34a;
+      border-color: rgba(22, 163, 74, 0.15);
+    }
+    html[data-theme="light"] .score-badge.avg {
+      background-color: rgba(217, 119, 6, 0.08);
+      color: #d97706;
+      border-color: rgba(217, 119, 6, 0.15);
+    }
+    html[data-theme="light"] .score-badge.poor {
+      background-color: rgba(220, 38, 38, 0.08);
+      color: #dc2626;
+      border-color: rgba(220, 38, 38, 0.15);
+    }
+
+    .score-bar-bg {
+      width: 100px;
+      height: 8px;
+      background-color: var(--panel-border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
     .no-issues-msg {
       padding: 12px 0;
       color: var(--color-clean);
@@ -714,16 +763,59 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       </table>
     </div>
 
+    <!-- Drawing Quality Scoreboard Section -->
+    <div class="section-title">Drawing Quality Scoreboard</div>
+    <div class="audit-summary-panel">
+      <table class="audit-summary-table">
+        <thead>
+          <tr>
+            <th>Drawing File</th>
+            <th>Compliance Status</th>
+            <th>Quality Score</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for page in pages | sort(attribute='score', reverse=true) %}
+          <tr class="{{ 'passed-row' if page.score >= 80 else 'failed-row' }}">
+            <td class="cat-name-cell">{{ page.page }}</td>
+            <td>
+              <span class="status-pill {{ 'ok' if page.status == 'PASS' else 'bad' }}">
+                {{ page.status }}
+              </span>
+            </td>
+            <td>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="score-bar-bg">
+                  <div style="width: {{ page.score }}%; height: 100%; background-color: {{ '#10b981' if page.score >= 80 else '#f59e0b' if page.score >= 50 else '#ef4444' }};"></div>
+                </div>
+                <strong style="color: {{ '#10b981' if page.score >= 80 else '#f59e0b' if page.score >= 50 else '#ef4444' }}; font-size: 1.1rem; min-width: 60px; text-align: right;">{{ page.score }}/100</strong>
+              </div>
+            </td>
+            <td>
+              <a href="#page-{{ page.index }}" style="color: var(--primary); text-decoration: none; font-weight: 700; font-size: 0.85rem;">View Details →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
     <div class="section-title">Page Breakdown Analysis</div>
 
     <!-- Pages List -->
     {% for page in pages %}
-    <div class="page-section">
+    <div class="page-section" id="page-{{ page.index }}">
       <div class="page-header {{ 'bad' if page.page_has_issues else 'ok' }}">
         <span>Page {{ page.page }}</span>
-        <span class="status-pill {{ 'bad' if page.page_has_issues else 'ok' }}">
-          {{ page.status }} - {{ page.issues|length }} issue(s) detected
-        </span>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span class="score-badge {{ 'good' if page.score >= 80 else 'avg' if page.score >= 50 else 'poor' }}">
+            Score: {{ page.score }}/100
+          </span>
+          <span class="status-pill {{ 'bad' if page.page_has_issues else 'ok' }}">
+            {{ page.status }} - {{ page.issues|length }} issue(s) detected
+          </span>
+        </div>
       </div>
 
       {% if page.comparison_image %}
@@ -931,9 +1023,16 @@ def generate_report(results: list[dict], output_path: str = "output/report.html"
     bad_pages    = sum(1 for r in results if r.get("page_has_issues"))
     ok_pages     = len(results) - bad_pages
 
-    # 1. Map global categories from individual page reports
+    # 1. Map global categories, assign anchors, and calculate drawing quality scores
     global_categories = {name: {"failed_count": 0, "status": "PASS"} for name in CATEGORIES_LIST}
-    for r in results:
+    for idx, r in enumerate(results):
+        r["index"] = idx + 1
+        page_issues = r.get("issues", [])
+        high = sum(1 for i in page_issues if i.get("severity") == "HIGH")
+        medium = sum(1 for i in page_issues if i.get("severity") == "MEDIUM")
+        low = sum(1 for i in page_issues if i.get("severity") == "LOW")
+        r["score"] = max(0, 100 - (high * 10 + medium * 5 + low * 2))
+
         for cat in r.get("categories_report", []):
             if cat["status"] == "FAIL":
                 global_categories[cat["name"]]["failed_count"] += 1
