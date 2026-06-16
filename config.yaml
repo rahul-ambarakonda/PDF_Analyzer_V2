@@ -1,0 +1,81 @@
+# Creo/CAD PDF Text-Fidelity Comparator — default configuration.
+# Every tunable lives here (SPEC §7): no magic numbers in code.
+# All point/length values are in PDF points (1/72 inch) unless noted.
+
+# --- Rendering ---
+render_dpi: 300                 # DPI for clip-render comparisons (SPEC §3) and report rasters.
+
+# --- Tolerances / thresholds ---
+position_tolerance_pts: 3.0     # Max post-registration shift before a matched run is "misplaced".
+overlap_ratio_threshold: 0.15   # Min intersection/min-area before two candidate runs "overlap".
+pixel_diff_threshold: 0.12      # 1-SSIM above this => rendered regions differ (real render defect).
+confidence_threshold: 0.50      # Defects below this confidence go to the "review" queue, not "defect".
+
+# --- Matching ---
+match_max_cost: 60.0            # Hungarian assignments costlier than this are rejected (=> unmatched).
+match_position_weight: 1.0      # Cost = position_distance_pts * this + edit_distance_norm * weight.
+match_string_weight: 40.0       # Weight on normalized string-edit distance (0..1) in match cost.
+
+# --- Annotation clustering (class 2: missing_annotation) ---
+cluster_gap_pts: 12.0           # Max gap between runs to merge into one annotation stack.
+leader_gap_pts: 6.0             # A drawing line endpoint within this of two runs links them.
+
+# --- Page registration ---
+registration_min_anchors: 3     # Min matched anchors required to estimate the affine transform.
+# Multi-view: a sheet may hold several drawing views, and a view can be placed at a different
+# spot on the candidate (Creo) sheet than on the reference. Sequential RANSAC fits one local
+# affine per consistently-moving group of anchors, so a relocated *view* is absorbed (not
+# flagged) while a single run that shifted relative to its view is still caught.
+registration_multi_view: true     # false => one global affine for the whole sheet (legacy).
+registration_min_view_anchors: 3  # A view needs >= this many inliers to earn its own transform.
+registration_max_views: 16        # Safety cap on the number of local models per sheet.
+
+# --- Zone grid (drawing border references, e.g. cols 1-12 x rows A-H) ---
+zone:
+  margin_band_frac: 0.06        # Fraction of sheet width/height treated as the border label band.
+  row_first: true               # Emit "C7" (row-letter + col-number). false => "7C".
+  title_block_frac: 0.33        # Bottom-right rectangle (frac of W and H) labelled "title-block".
+
+# --- Optional ignore regions (rects in PDF points on the candidate, any page) ---
+# Each: [x0, y0, x1, y1]. Defects whose candidate bbox center falls inside are dropped.
+ignore_regions: []
+
+# --- Symbol / format equivalences (normalized equal at the string layer, SPEC §4) ---
+# Each group: all members are treated as identical. First member is the canonical form.
+symbol_equivalences:
+  - ["1/2", "½", "½"]                 # 1/2, ½
+  - ["1/4", "¼"]                            # 1/4, ¼
+  - ["3/4", "¾"]                            # 3/4, ¾
+  - ["DIA", "Ø", "⌀", "φ", "ф"]  # DIA, Ø, ⌀, φ
+  - ["DEG", "°"]                            # DEG, °
+  - ["+/-", "±"]                            # +/-, ±
+  - ["DEG", "deg"]
+# Format normalization toggles:
+strip_trailing_zeros: true      # 1.50 == 1.5 == 1.500
+decimal_separator_equiv: true   # 1,5 == 1.5
+collapse_whitespace: true       # "  A  B " == "A B"
+case_insensitive: false         # keep case-sensitive by default for drawings
+
+# --- Per-class cause/fix/severity templates ---
+# Slots: {ref_text} {cand_text} {zone}. Used to fill issue.cause / issue.fix / issue.severity.
+templates:
+  missing_text:
+    severity: high
+    cause: "Text '{ref_text}' present in the reference is absent from the candidate at zone {zone}; likely dropped during the Creo PDF export or not transferred from the model."
+    fix: "Confirm the note/dimension '{ref_text}' exists in the Creo model and is set to export, then re-export the PDF."
+  missing_annotation:
+    severity: high
+    cause: "Annotation '{ref_text}' (leader/feature-control/note cluster) present in the reference is missing from the candidate near zone {zone}."
+    fix: "Restore the annotation in Creo (check suppressed/hidden annotation states and the drawing view it attaches to), then re-export."
+  text_overlap:
+    severity: medium
+    cause: "Candidate annotations collide at zone {zone} ('{cand_text}'), reducing legibility; typically an export placement/auto-arrange artifact."
+    fix: "Reposition the overlapping annotations in the Creo drawing so their text no longer intersects, then re-export."
+  text_misplacement:
+    severity: medium
+    cause: "Text '{ref_text}' is shifted from its reference position (zone {zone}) beyond tolerance after page registration; annotation anchored differently on export."
+    fix: "Re-anchor '{ref_text}' to the correct view/datum in Creo so its placement matches the reference, then re-export."
+  font_glyph_corruption:
+    severity: high
+    cause: "Text '{ref_text}' renders as '{cand_text}' at zone {zone}: the glyph/font was substituted at render time on Creo export (the engineer sees the wrong glyph)."
+    fix: "Embed the required font/symbol in the Creo PDF export profile (or switch the note to a TrueType font that contains the glyph), then re-export."

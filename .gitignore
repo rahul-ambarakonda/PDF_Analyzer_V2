@@ -138,6 +138,7 @@ cython_debug/
 
 # Local Drawing QA Agent output and cache folders
 output/
+report/
 .gemini/
 brain/
 scratch/

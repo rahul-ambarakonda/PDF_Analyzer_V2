@@ -1,0 +1,29 @@
+[
+  {
+    "id": "D-001",
+    "page": 1,
+    "zone": "D4",
+    "class": "font_glyph_corruption",
+    "severity": "high",
+    "confidence": 1.0,
+    "status": "defect",
+    "ref_text": "1/2",
+    "cand_text": "1#8",
+    "bbox_ref": [
+      501.12,
+      475.92,
+      526.85,
+      494.53
+    ],
+    "bbox_cand": [
+      501.12,
+      475.92,
+      534.87,
+      494.53
+    ],
+    "rendered_diff_score": 0.514,
+    "cause": "Text '1/2' renders as '1#8' at zone D4: the glyph/font was substituted at render time on Creo export (the engineer sees the wrong glyph).",
+    "fix": "Embed the required font/symbol in the Creo PDF export profile (or switch the note to a TrueType font that contains the glyph), then re-export.",
+    "message": "Text '1/2' renders as '1#8' (zone D4)."
+  }
+]
