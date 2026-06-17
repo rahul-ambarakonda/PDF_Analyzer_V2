@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+.DS_Store
+*.log
+
+# Local env overrides
+.env
+.env.local
+.env.*.local
+
+# Tooling caches
+.vite
+node_modules/.tmp

@@ -1,0 +1,17 @@
+# Runtime dependencies — pinned for reproducible production builds.
+
+# --- Web API ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+pydantic-settings==2.7.1
+
+# --- Comparator pipeline ---
+pymupdf==1.24.10
+numpy==1.26.4
+scipy==1.13.1
+scikit-image==0.24.0
+Pillow==10.4.0
+PyYAML==6.0.2
+jinja2==3.1.4

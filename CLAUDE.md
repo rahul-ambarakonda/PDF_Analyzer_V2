@@ -2,58 +2,102 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## ⚠️ SPEC.md is authoritative — and the current code does not yet match it
+## What this is
 
-`SPEC.md` is the declared source of truth ("Build to it. Where this file and your own assumptions disagree, this file wins"). It specifies a **Creo/CAD PDF *text-fidelity* comparator** that is a substantial redesign of what currently exists. Before doing spec-driven work, read `SPEC.md` in full. Key divergences between spec and the present code:
+A **Creo/CAD PDF text-fidelity comparator**: it compares a *reference* drawing PDF against a
+*candidate* (Creo-exported) PDF and reports text/annotation fidelity defects. Geometry comparison
+is **out of scope**. It is 100% offline and rule-based (PyMuPDF + scikit-image + scipy — **no model
+calls**, no OpenCV).
 
-| Topic | SPEC.md target | Current code |
-|---|---|---|
-| Scope | Text/annotation fidelity **only**; geometry explicitly out of scope | Also does pixel-level geometry diffing (`GEOMETRIC_DIFFERENCE`) |
-| Module layout | `extract.py`, `register.py`, `match.py`, `render_compare.py`, `detect.py`, `normalize.py`, `report.py`, `cli.py` | `main.py` + `core/{pdf_utils,qa_agent,image_utils,report}.py` |
-| Matching | scipy Hungarian, cost = position + string-edit | Greedy nearest-match on exact string equality (`compare_text_elements`) |
-| Class 5 rule | "Rendered glyph is ground truth" — escalate a text mismatch to a defect **only if the rendered region also differs** (suppresses encoding-only artifacts). A string-only test is forbidden. | Not implemented |
-| Config | `config.yaml` with externalized tolerances + `symbol_equivalences` | Python constants in `config.py`; no symbol normalization |
-| Tests | pytest + synthetic defect-injection fixtures, recall/precision acceptance gates | **No tests exist** |
-| CLI | `compare --reference … --candidate … --config … --out …`, non-zero exit on defect | `python main.py --ref … --review …`, no exit-code semantics |
+The repo is a **monorepo**. Everything currently lives under `backend/`; a `frontend/` will be
+added as a sibling. There is no top-level `SPEC.md`, `main.py`, or `core/` package — earlier
+versions of this file referenced those; they are gone.
 
-Treat spec work as building new modules toward `SPEC.md` §6/§10, not patching the existing pipeline. SPEC.md §11 requires entering plan mode and producing a `PLAN.md` before writing code, building in the §10 slice order, and stopping for review after each slice.
-
-## Running the current tool
-
-```bash
-python -m venv venv && source venv/bin/activate   # Windows: .\venv\Scripts\activate
-pip install -r requirements.txt
-
-python main.py                                      # compares all matching filenames in Input_PDFs/ vs Creo_PDFs/
-python main.py --ref Input_PDFs/X.pdf --review Creo_PDFs/X.pdf   # single pair
-python main.py --dpi 300 --out output               # defaults shown
+```
+backend/
+├── app/            # FastAPI service (the production API layer)
+│   ├── main.py         # create_app() factory; lifespan builds the job store + worker
+│   ├── config.py       # pydantic-settings Settings (env vars, APP_ prefix)
+│   ├── logging.py      # structured JSON logging + X-Request-ID middleware
+│   ├── errors.py       # ApiError + handlers → uniform {error, detail, request_id}
+│   ├── api/            # routes.py (endpoints) + schemas.py (pydantic responses)
+│   ├── jobs/           # models.py, store.py (in-memory, evicting), worker.py (ThreadPoolExecutor)
+│   └── services/       # comparison.py — bridges the worker to the comparator pipeline
+├── comparator/     # the comparison engine (the heart; see below)
+└── config.yaml     # externalized tolerances / symbol equivalences / cause-fix templates
 ```
 
-Pairs are matched by **identical filename** across the two directories. Output lands in `output/` (gitignored): `report.html` + `report.json` globally, plus per-drawing `comparisons/<name>.{png,pdf,json}`. There is no build/lint/test step — it is a single-command CLI.
+## Running
 
-## Current architecture (the existing pipeline)
+All commands run from `backend/`.
 
-Despite README artifacts implying an LLM ("Llama/Ollama" references were in deleted docs), the tool is **100% offline rule-based** — PyMuPDF + OpenCV + geometry, no model calls.
+```bash
+cd backend
+python -m venv venv && source venv/bin/activate     # repo already has a venv/ at the root
+pip install -r requirements.txt
 
-Data flow: `main.py` orchestrates per page → `core/pdf_utils.py` extracts → `core/qa_agent.analyze_page()` does all detection → `core/image_utils.py` annotates → `core/report.py` renders HTML.
+uvicorn app.main:app --reload                        # http://127.0.0.1:8000 (OpenAPI at /docs)
+```
 
-**`core/qa_agent.py` is the heart.** Two concepts dominate it:
+The comparator's report renderer (PIL `ImageFont`) uses the DejaVu fonts when present; install
+`fonts-dejavu-core` on the host for faithful glyph rendering.
 
-1. **Dual coordinate systems, maintained in parallel everywhere.** PDF points (72 DPI, from PyMuPDF) and rendered pixels (at `--dpi`). `compute_alignment()` produces a `DrawingAlignment` carrying *two* affine transforms per region — `M_pdf` and `M_pixel`. Text logic works in PDF points; pixel-diff logic works in pixels. When editing alignment/mapping code, keep both spaces consistent. Note rendering caps the long edge at 4000px (`pdf_to_images`), so effective DPI can be below the requested value — alignment recomputes actual DPI from image-vs-page-size ratios rather than trusting the flag.
+## The comparator engine (`backend/comparator/`)
 
-2. **Hybrid local/global registration** (because SolidWorks/SolidEdge and Creo lay views out differently). `compute_alignment()`: masks out text → SIFT+FLANN feature matches on clean geometry → global RANSAC affine → segments the sheet into drawing **views** (threshold/dilate/contours) → fits a **per-view local affine**, falling back to global when a view's transform is degenerate (`is_valid_transform`). `DrawingAlignment` then maps points/bboxes ref↔review, picking the containing view via `_find_best_view`.
+Single shared entry point: `pipeline.run_comparison(reference, candidate, config) -> report dict`,
+and `pipeline.write_reports(...)` to persist `report.json` + `report.html`. Per-page detection is
+`detect.analyze_page(...)`. Module roles:
 
-Detection layers, all merged in `analyze_page()`:
-- `compare_text_elements()` → `MISSING_ANNOTATION`, `TEXT_MISPLACEMENT`, `TEXT_OVERLAP` (text-vs-text via SAT polygon overlap with parallel-dimension-stack suppression; text-vs-geometry via a spatial line grid).
-- `detect_geometric_differences()` → `GEOMETRIC_DIFFERENCE`: warps the reference into review space **per-view via a Voronoi distance-transform partition**, dilation-tolerant pixel diff, border masking, dual-threshold by text proximity, then **coalesces** noisy per-view/sheet diffs into summary issues.
-- Page-size and per-view scale checks → `LAYOUT_MISMATCH`, `SCALE_DISCREPANCY`.
+- `extract.py` — pull text runs (with bboxes, fonts) from each page.
+- `register.py` — **per-view registration**: sequential RANSAC fits one local affine per
+  consistently-moving group of text anchors, so a relocated *view* is absorbed (not flagged) while
+  a label moved *relative to its view* still trips `text_misplacement`. A view needs
+  ≥ `registration_min_view_anchors` anchors to earn its own transform (`registration_multi_view:
+  false` falls back to one global affine).
+- `match.py` — pairs reference↔candidate runs with the scipy **Hungarian** assignment
+  (`linear_sum_assignment`), cost = position + string-edit distance.
+- `normalize.py` — `Normalizer` applies `symbol_equivalences`, trailing-zero/decimal/whitespace
+  rules from config before string comparison.
+- `render_compare.py` — **the core rule: the rendered glyph is ground truth.** A string mismatch
+  escalates to `font_glyph_corruption` *only if the clip-rendered region also differs*. A
+  candidate that renders correctly but extracts wrong text (broken ToUnicode / encoding artifact)
+  is **suppressed**. A string-only comparison is never the sole test — do not weaken this.
+- `detect.py` — produces the five defect classes: `missing_text`, `missing_annotation`,
+  `text_overlap`, `text_misplacement`, `font_glyph_corruption`.
+- `report.py` — `build_report` (the JSON dict + meta/counts), `render_html` (one Jinja2 string
+  template; comparison images base64-inlined so the page is self-contained), `has_defects`.
+- `config.py` — `Config.load(path)` typed config from `config.yaml`.
 
-**Two parallel taxonomies — do not conflate them.** Raw issues carry a `type` (the 6 strings above, used for box colors in `image_utils`). Separately, `classify_issue()` buckets every issue into one of **13 audit categories** (`CATEGORIES_LIST`) using location heuristics + regex. The **quality score (/100)** is computed from failed *categories* weighted by `CATEGORY_WEIGHTS` — not from issue counts. This score/category logic is duplicated in three places (`analyze_page`, `main.py` doc-level aggregation, `report.py` fallback); keep them in sync if you change weights.
+**Two taxonomies — do not conflate.** Each defect has a `class` (the five strings above).
+Separately, defects are bucketed into 13 **audit categories**, and the page quality score (/100)
+subtracts each *failed category's* weight (not per-issue). Geometry-only categories have no
+detector and stay PASS by design.
 
-`core/report.py` holds the entire HTML/CSS/JS dashboard as one Jinja2 string template; comparison images are base64-inlined to avoid browser CORS/tainted-canvas errors during the client-side PDF export.
+## The API layer (`backend/app/`) — key invariants
+
+- **Async, in-memory job model.** `POST /api/v1/compare` validates + pairs uploads by filename,
+  creates a job, hands the PDF bytes to a `ThreadPoolExecutor` worker (`jobs/worker.py`), and
+  returns **202 `{job_id}`**. Clients poll `GET /api/v1/jobs/{id}`; reports are fetched per pair as
+  JSON (`/pairs/{name}`) or self-contained HTML (`/report/{name}`).
+- **Results live in memory only** (`jobs/store.py`), with TTL + max-count eviction to bound memory.
+  No S3/DB by design.
+- **Single Uvicorn worker, single instance — required, not incidental.** The job store is
+  process-local, so it must not be sharded across processes. Do **not** add Uvicorn workers or a
+  second instance without first externalizing state (Redis for jobs, S3 for artifacts). CPU scales
+  via `APP_WORKER_CONCURRENCY` (threads — the CV code releases the GIL). See
+  `backend/README.md` "Scaling boundary".
+- The worker calls `services/comparison.py`, which writes the uploaded bytes to a short-lived temp
+  dir, runs the pipeline, reads `report.json` + `report.html` back into memory, and deletes the
+  dir. After it returns, nothing for the pair is on disk.
 
 ## Conventions
 
-- Tolerances/thresholds live in `config.py` (`TEXT_DISTANCE_TOLERANCE`, `MAX_MISPLACEMENT_SHIFT`, `IMAGE_DIFF_THRESHOLD`, `MIN_DIFF_CONTOUR_AREA`) and are expressed in **PDF points** for text, **pixels** for image diffs — check which space a constant belongs to before tuning.
-- All extracted text/drawing coordinates are pre-rotated to user-visible orientation via `page.rotation_matrix` in `pdf_utils.py`; downstream code assumes unrotated/visible coordinates.
-- Affine math is hand-rolled (`M[0,0]*x + M[0,1]*y + M[0,2]`) and guarded against overflow/degeneracy — preserve the clamping and `is_valid_transform`/fallback patterns when touching mapping code.
+- **Engine tuning** lives in `config.yaml` (tolerances in **PDF points** for text;
+  `pixel_diff_threshold` etc. in normalized pixel space). **Operational** settings (CORS, upload
+  limits, worker concurrency, job TTL/cap) are env vars with the `APP_` prefix — see
+  `app/config.py` and `.env.example`. Keep magic numbers out of code.
+- Deploy target is a single EC2 t2/t3.small (~2 GB). Defaults (worker concurrency, upload caps)
+  in `app/config.py` are sized for that box; run with a single Uvicorn worker (the job store is
+  in-process memory).
+- When touching registration/affine code, preserve the degeneracy/fallback guards (a lone moved
+  run must never masquerade as a moved view).
