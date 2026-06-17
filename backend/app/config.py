@@ -37,8 +37,8 @@ class Settings(BaseSettings):
     # --- Upload limits ---
     max_upload_bytes: int = 512 * 1024 * 1024   # total multipart body cap
     max_file_bytes: int = 64 * 1024 * 1024      # per-PDF cap
-    max_files_per_side: int = 200               # cap on reference/candidate count each
-    max_pairs: int = 200                        # cap on matched pairs per job
+    max_files_per_side: int = 20                # cap on reference/candidate count each (per folder)
+    max_pairs: int = 20                         # cap on matched pairs per job
 
     # --- Worker / job store (sized for a single small EC2 box) ---
     worker_concurrency: int = 1                 # CV threads; raise on multi-vCPU hosts

@@ -1,5 +1,6 @@
 import { useId, useRef } from 'react';
 
+import { MAX_FILES_PER_FOLDER } from '@/lib/constants';
 import { folderLabel, toFolderFiles } from '@/lib/format';
 import type { FolderFile } from '@/types';
 
@@ -33,6 +34,12 @@ export function FolderPicker({
       return;
     }
     const files = toFolderFiles(all);
+    if (files.length > MAX_FILES_PER_FOLDER) {
+      onInvalid(
+        `You can upload at most ${MAX_FILES_PER_FOLDER} PDFs per folder (this folder has ${files.length}).`,
+      );
+      return;
+    }
     onSelect(files, folderLabel(files));
   };
 

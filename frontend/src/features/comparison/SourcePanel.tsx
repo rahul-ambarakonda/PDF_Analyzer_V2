@@ -50,7 +50,7 @@ export function SourcePanel(props: SourcePanelProps) {
             label="PDF files (reference)"
             count={props.referenceCount}
             promptText="Click to select reference PDFs"
-            emptyHint="No files selected yet"
+            emptyHint="No files selected yet · up to 20 PDFs"
             onSelect={props.onSelectReference}
             onInvalid={props.onInvalid}
           />
@@ -59,7 +59,7 @@ export function SourcePanel(props: SourcePanelProps) {
             label="Creo PDF files"
             count={props.candidateCount}
             promptText="Click to select Creo PDFs"
-            emptyHint="No files selected yet"
+            emptyHint="No files selected yet · up to 20 PDFs"
             onSelect={props.onSelectCandidate}
             onInvalid={props.onInvalid}
           />
