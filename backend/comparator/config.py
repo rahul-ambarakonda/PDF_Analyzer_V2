@@ -49,6 +49,11 @@ class Config:
     collapse_whitespace: bool = True
     case_insensitive: bool = False
 
+    cv_alignment_method: str = "orb"
+    cv_min_contour_area: float = 10.0
+    dbscan_eps_pts: float = 50.0
+    dbscan_min_samples: int = 1
+
     templates: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @classmethod
@@ -72,6 +77,8 @@ class Config:
             "registration_min_view_anchors", "registration_max_views", "ignore_regions",
             "symbol_equivalences", "strip_trailing_zeros", "decimal_separator_equiv",
             "collapse_whitespace", "case_insensitive", "templates",
+            "cv_alignment_method", "cv_min_contour_area", "dbscan_eps_pts",
+            "dbscan_min_samples",
         }
         kwargs = {k: data[k] for k in known if k in data}
         cfg = cls(zone=zone, **kwargs)
@@ -87,6 +94,15 @@ class Config:
                 raise ValueError(f"{name} must be non-negative")
         if not 0.0 <= self.confidence_threshold <= 1.0:
             raise ValueError("confidence_threshold must be in [0, 1]")
+        if self.cv_alignment_method not in ("orb", "ecc"):
+            raise ValueError("cv_alignment_method must be either 'orb' or 'ecc'")
+        if self.cv_min_contour_area < 0:
+            raise ValueError("cv_min_contour_area must be non-negative")
+        if self.dbscan_eps_pts <= 0:
+            raise ValueError("dbscan_eps_pts must be positive")
+        if self.dbscan_min_samples <= 0:
+            raise ValueError("dbscan_min_samples must be positive")
 
     def template_for(self, defect_class: str) -> dict[str, str]:
         return self.templates.get(defect_class, {})
+

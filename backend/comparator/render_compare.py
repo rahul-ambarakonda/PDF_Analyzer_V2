@@ -31,18 +31,39 @@ class RenderComparer:
         self.dpi = config.render_dpi
 
     def render_clip(self, page: fitz.Page, bbox: BBox, pad_pts: float = 1.0) -> np.ndarray:
-        """Render a padded bbox region to a grayscale uint8 array."""
+        """Render a padded bbox region to a grayscale uint8 array by cropping from a cached full-page raster."""
+        from .cv_layer import page_to_numpy
+        full_img = page_to_numpy(page, self.dpi)
+        
         x0, y0, x1, y1 = bbox
-        clip = fitz.Rect(x0 - pad_pts, y0 - pad_pts, x1 + pad_pts, y1 + pad_pts)
-        clip = clip & page.rect  # keep inside the page
-        if clip.is_empty or clip.width < 1 or clip.height < 1:
+        # Clamp coordinates to page dimensions
+        x0 = max(0.0, min(x0, page.rect.width))
+        x1 = max(0.0, min(x1, page.rect.width))
+        y0 = max(0.0, min(y0, page.rect.height))
+        y1 = max(0.0, min(y1, page.rect.height))
+        
+        cx0 = max(0.0, x0 - pad_pts)
+        cy0 = max(0.0, y0 - pad_pts)
+        cx1 = min(page.rect.width, x1 + pad_pts)
+        cy1 = min(page.rect.height, y1 + pad_pts)
+        
+        if cx1 <= cx0 or cy1 <= cy0:
             return np.full((2, 2), 255, dtype=np.uint8)
-        zoom = self.dpi / 72.0
-        mat = fitz.Matrix(zoom, zoom)
-        pix = page.get_pixmap(matrix=mat, clip=clip, colorspace=fitz.csGRAY, alpha=False)
-        if pix.width == 0 or pix.height == 0:
+            
+        h, w = full_img.shape
+        scale_x = w / page.rect.width
+        scale_y = h / page.rect.height
+        
+        px0 = max(0, int(round(cx0 * scale_x)))
+        py0 = max(0, int(round(cy0 * scale_y)))
+        px1 = min(w, int(round(cx1 * scale_x)))
+        py1 = min(h, int(round(cy1 * scale_y)))
+        
+        if px1 <= px0 or py1 <= py0:
             return np.full((2, 2), 255, dtype=np.uint8)
-        return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width)
+            
+        return full_img[py0:py1, px0:px1].copy()
+
 
     def diff_score(
         self,
