@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     port: int = 8000
 
     # --- CORS (frontend origins). "*" allows any origin. ---
-    cors_allow_origins: list[str] = Field(default_factory=lambda: ["*"])
+    cors_allow_origins: str | list[str] = Field(default_factory=lambda: ["*"])
 
     # --- Upload limits ---
     max_upload_bytes: int = 512 * 1024 * 1024   # total multipart body cap

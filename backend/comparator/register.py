@@ -45,6 +45,12 @@ class _LocalModel:
 
     matrix: np.ndarray
     anchors: np.ndarray  # (N, 2) reference-space points used to route queries to this model
+    rotation_angle: float = 0.0
+
+    def __post_init__(self):
+        angle = np.degrees(np.arctan2(self.matrix[1, 0], self.matrix[0, 0]))
+        # Keep in [-180, 180] range
+        self.rotation_angle = float((angle + 180) % 360 - 180)
 
 
 @dataclass
@@ -77,6 +83,22 @@ class Registration:
             float(m[0, 0] * x + m[0, 1] * y + m[0, 2]),
             float(m[1, 0] * x + m[1, 1] * y + m[1, 2]),
         )
+
+    def view_info_for(self, x: float, y: float) -> tuple[int | None, float]:
+        """Return (view_index, rotation_angle) for the nearest view model."""
+        if not self.models:
+            angle = np.degrees(np.arctan2(self.matrix[1, 0], self.matrix[0, 0]))
+            angle = float((angle + 180) % 360 - 180)
+            return None, angle
+        
+        best_idx = 0
+        best_d = float("inf")
+        for idx, mdl in enumerate(self.models):
+            d = float(np.min(((mdl.anchors[:, 0] - x) ** 2 + (mdl.anchors[:, 1] - y) ** 2)))
+            if d < best_d:
+                best_d = d
+                best_idx = idx
+        return best_idx, self.models[best_idx].rotation_angle
 
     def map_bbox(self, bbox: BBox) -> BBox:
         x0, y0, x1, y1 = bbox
@@ -237,8 +259,15 @@ class ZoneGrid:
     def zone_for_point(self, x: float, y: float) -> str | None:
         w, h = self.page_size
         tb = self.config.zone.title_block_frac
+        band = self.config.zone.margin_band_frac
+        
         if x > w * (1 - tb) and y > h * (1 - tb):
             return "title-block"
+            
+        # Ignore defects falling on the border
+        if x < w * band or x > w * (1 - band) or y < h * band or y > h * (1 - band):
+            return "border"
+            
         if not self.valid:
             return None
         col = min(self.col_centers, key=lambda c: abs(c[0] - x))[1]
@@ -263,12 +292,23 @@ def build_zone_grid(runs: list[TextRun], page_size: tuple[float, float], config:
         elif _LETTER.match(r.text) and in_left_right and not in_top_bot:
             let_by_val.setdefault(r.text.upper(), []).append(cy)
 
-    col_centers = sorted(
-        ((float(np.median(xs)), val) for val, xs in num_by_val.items()),
-        key=lambda c: c[0],
-    )
-    row_centers = sorted(
-        ((float(np.median(ys)), val) for val, ys in let_by_val.items()),
-        key=lambda r: r[0],
-    )
+    # Sort labels by their observed median positions
+    col_labels_sorted = [val for val, xs in sorted(num_by_val.items(), key=lambda item: float(np.median(item[1])))]
+    row_labels_sorted = [val for val, ys in sorted(let_by_val.items(), key=lambda item: float(np.median(item[1])))]
+
+    # Generate strictly equal-sized areas across the inner drawing area
+    col_centers = []
+    if col_labels_sorted:
+        col_width = (right_x - left_x) / len(col_labels_sorted)
+        for i, val in enumerate(col_labels_sorted):
+            cx = left_x + (i + 0.5) * col_width
+            col_centers.append((cx, val))
+
+    row_centers = []
+    if row_labels_sorted:
+        row_height = (bot_y - top_y) / len(row_labels_sorted)
+        for i, val in enumerate(row_labels_sorted):
+            cy = top_y + (i + 0.5) * row_height
+            row_centers.append((cy, val))
+
     return ZoneGrid(col_centers, row_centers, page_size, config)

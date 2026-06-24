@@ -3,7 +3,7 @@
 # All point/length values are in PDF points (1/72 inch) unless noted.
 
 # --- Rendering ---
-render_dpi: 300                 # DPI for clip-render comparisons (SPEC §3) and report rasters.
+render_dpi: 150                 # DPI for clip-render comparisons (SPEC §3) and report rasters.
 
 # --- Tolerances / thresholds ---
 position_tolerance_pts: 3.0     # Max post-registration shift before a matched run is "misplaced".
@@ -56,6 +56,13 @@ decimal_separator_equiv: true   # 1,5 == 1.5
 collapse_whitespace: true       # "  A  B " == "A B"
 case_insensitive: false         # keep case-sensitive by default for drawings
 
+# --- Dual-Track and Computer Vision settings ---
+cv_alignment_method: "orb"      # "orb" or "ecc" to align candidates to reference
+cv_min_contour_area: 10.0       # Minimum area in px^2 for visual contours to flag
+dbscan_eps_pts: 50.0            # DBSCAN epsilon in PDF points (clustering distance)
+dbscan_min_samples: 1           # DBSCAN min samples per cluster
+
+
 # --- Per-class cause/fix/severity templates ---
 # Slots: {ref_text} {cand_text} {zone}. Used to fill issue.cause / issue.fix / issue.severity.
 templates:
@@ -63,6 +70,11 @@ templates:
     severity: high
     cause: "Text '{ref_text}' present in the reference is absent from the candidate at zone {zone}; likely dropped during the Creo PDF export or not transferred from the model."
     fix: "Confirm the note/dimension '{ref_text}' exists in the Creo model and is set to export, then re-export the PDF."
+  added_text:
+    severity: medium
+    cause: "Text '{cand_text}' is present in the candidate but absent from the reference at zone {zone}; likely added in the Creo revision."
+    fix: "Verify if the added text/note is authorized, or remove it from the Creo model."
+
   missing_annotation:
     severity: high
     cause: "Annotation '{ref_text}' (leader/feature-control/note cluster) present in the reference is missing from the candidate near zone {zone}."
@@ -79,3 +91,8 @@ templates:
     severity: high
     cause: "Text '{ref_text}' renders as '{cand_text}' at zone {zone}: the glyph/font was substituted at render time on Creo export (the engineer sees the wrong glyph)."
     fix: "Embed the required font/symbol in the Creo PDF export profile (or switch the note to a TrueType font that contains the glyph), then re-export."
+  visual_defect:
+    severity: medium
+    cause: "Graphical layout discrepancy detected (e.g., modified lines, missing geometry, logo change, or shifted vector outlines) at zone {zone}."
+    fix: "Review the candidate CAD model and drawing views to ensure lines, symbols, or outlines were not modified or omitted, then re-export."
+
