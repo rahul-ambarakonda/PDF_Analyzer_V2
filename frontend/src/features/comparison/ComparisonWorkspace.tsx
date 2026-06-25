@@ -3,10 +3,7 @@ import { useMemo, useReducer } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { ReportPanel } from '@/features/comparison/ReportPanel';
 import { SourcePanel } from '@/features/comparison/SourcePanel';
-import {
-  initialWorkspaceState,
-  workspaceReducer,
-} from '@/features/comparison/workspaceReducer';
+import { initialWorkspaceState, workspaceReducer } from '@/features/comparison/workspaceReducer';
 import { useJob } from '@/hooks/useJob';
 import { useStartComparison } from '@/hooks/useStartComparison';
 import { buildReportModel } from '@/lib/report';

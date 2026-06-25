@@ -37,12 +37,15 @@ def _worker(request: Request) -> ComparisonWorker:
     return request.app.state.worker
 
 
-def _pdf_uploads(files: list[UploadFile]) -> dict[str, UploadFile]:
-    """Keep PDFs only, keyed by basename (last writer wins, matching legacy behaviour)."""
-    out: dict[str, UploadFile] = {}
+def _pdf_uploads(files: list[UploadFile]) -> dict[str, tuple[str, UploadFile]]:
+    """Keep PDFs only, keyed by case-folded basename so pairing ignores filename case
+    (e.g. ``abc.pdf`` matches ``ABC.pdf``). The value preserves the original basename
+    for display. Last writer wins, matching legacy behaviour."""
+    out: dict[str, tuple[str, UploadFile]] = {}
     for f in files:
         if f.filename and f.filename.lower().endswith(".pdf"):
-            out[os.path.basename(f.filename)] = f
+            base = os.path.basename(f.filename)
+            out[base.casefold()] = (base, f)
     return out
 
 
@@ -73,18 +76,21 @@ async def compare(
             or len(cand_files) > settings.max_files_per_side):
         raise ApiError(400, f"Too many files (max {settings.max_files_per_side} per side).")
 
-    matched = sorted(set(ref_files) & set(cand_files))
-    if not matched:
+    matched_keys = sorted(set(ref_files) & set(cand_files))
+    if not matched_keys:
         raise ApiError(400, "No filenames match between the reference and candidate sets.")
-    if len(matched) > settings.max_pairs:
+    if len(matched_keys) > settings.max_pairs:
         raise ApiError(400, f"Too many matched pairs (max {settings.max_pairs}).")
 
-    # Read bytes into memory, enforcing per-file and total size caps.
+    # Read bytes into memory, enforcing per-file and total size caps. Pairs are keyed by the
+    # reference's original (case-preserved) basename for display; matching itself is case-folded.
     pairs_bytes: dict[str, tuple[bytes, bytes]] = {}
     total = 0
-    for name in matched:
-        ref_bytes = await ref_files[name].read()
-        cand_bytes = await cand_files[name].read()
+    for key in matched_keys:
+        name, ref_upload = ref_files[key]
+        _, cand_upload = cand_files[key]
+        ref_bytes = await ref_upload.read()
+        cand_bytes = await cand_upload.read()
         for blob in (ref_bytes, cand_bytes):
             if len(blob) > settings.max_file_bytes:
                 raise ApiError(413, f"'{name}' exceeds the {settings.max_file_bytes}-byte limit.")
@@ -94,10 +100,15 @@ async def compare(
         pairs_bytes[name] = (ref_bytes, cand_bytes)
 
     job = store.create()
-    for name in matched:
+    for name in pairs_bytes:
         job.pairs[name] = PairResult(name=name)
-    job.unmatched_reference = sorted(set(ref_files) - set(cand_files))
-    job.unmatched_candidate = sorted(set(cand_files) - set(ref_files))
+    matched = list(pairs_bytes)
+    job.unmatched_reference = sorted(
+        orig for key, (orig, _) in ref_files.items() if key not in cand_files
+    )
+    job.unmatched_candidate = sorted(
+        orig for key, (orig, _) in cand_files.items() if key not in ref_files
+    )
 
     # Snapshot the accepted ("queued") response before handing off — the worker may start and
     # flip the status to "running" before this returns.

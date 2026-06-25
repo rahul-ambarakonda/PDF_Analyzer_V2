@@ -207,6 +207,9 @@ def _render_page_png(page: fitz.Page, records: list[dict], dpi: int) -> str:
             continue
         color = CLASS_COLOR.get(r["class"], (128, 128, 128))
         x0, y0, x1, y1 = (v * zoom for v in bbox)
+        # PIL requires x0<=x1 and y0<=y1; a registration-mapped bbox can come back inverted.
+        x0, x1 = min(x0, x1), max(x0, x1)
+        y0, y1 = min(y0, y1), max(y0, y1)
         draw.rectangle([x0, y0, x1, y1], outline=color, width=max(2, int(2 * zoom)))
         label = r["id"]
         ly = max(0, y0 - max(12, int(14 * zoom)) - 2)
@@ -699,6 +702,8 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
             if (pdfStatus) { pdfStatus.textContent = 'PDF export is unavailable in this browser.'; }
             return;
           }
+          // Only html2pdf is exposed globally by the bundle (it does NOT leak html2canvas/jsPDF),
+          // so we drive everything through html2pdf and just size the page to fit on ONE sheet.
           if (typeof html2pdf === 'undefined') {
             if (pdfStatus) { pdfStatus.textContent = 'PDF library did not load. Opening print dialog instead.'; }
             window.print();
@@ -709,26 +714,61 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
           downloadBtn.disabled = true;
           if (pdfStatus) { pdfStatus.textContent = 'Rendering report for download...'; }
           try {
-            await html2pdf().set({
-              margin: 10,
-              filename: 'engineering-drawing-qa-report.pdf',
-              image: { type: 'jpeg', quality: 0.98 },
+            // Single-page export in two steps so the report never paginates:
+            //  1. Rasterize the report to ONE canvas (.toCanvas()). The html2canvas scale is
+            //     *capped* so the canvas never exceeds the browser limits (~16384px/side,
+            //     ~268M px area) — past that it returns a blank bitmap.
+            //  2. Feed that exact canvas back via .from(canvas, 'canvas') so html2pdf REUSES it
+            //     (no second render — re-rendering produced a different height and split the page)
+            //     and size the jsPDF page to the canvas aspect + margins, so html2pdf's own
+            //     page-count math (ceil(canvasH / floor(canvasW * innerRatio))) resolves to 1.
+            const w = reportRoot.scrollWidth;
+            const h = reportRoot.scrollHeight;
+            const MAX_DIM = 16000;
+            const MAX_AREA = 256 * 1024 * 1024;
+            let scale = Math.min(2, MAX_DIM / w, MAX_DIM / h, Math.sqrt(MAX_AREA / (w * h)));
+            if (!(scale > 0)) { scale = 1; }
+            const canvas = await html2pdf().set({
+              image: { type: 'jpeg', quality: 0.95 },
               html2canvas: {
-                scale: 2, useCORS: true, allowTaint: true, scrollY: 0,
+                scale: scale, useCORS: true, allowTaint: true, scrollX: 0, scrollY: 0,
+                backgroundColor: '#ffffff',
                 onclone: (clonedDoc) => {
                   clonedDoc.documentElement.dataset.theme = 'light';
                   clonedDoc.documentElement.classList.add('pdf-exporting');
                   const clonedRoot = clonedDoc.querySelector('.container');
-                  if (clonedRoot) { syncFailedCards(clonedRoot); }
+                  if (clonedRoot) {
+                    // The .container itself has no padding (the body holds it), so headings and the
+                    // last element sit flush against the capture edges and get shaved. Pad the clone
+                    // so content is inset inside the canvas; this padding also blocks the bottom
+                    // margin-collapse that was clipping the final row.
+                    clonedRoot.style.padding = '24px';
+                    clonedRoot.style.background = '#ffffff';
+                    syncFailedCards(clonedRoot);
+                  }
                   ['downloadPdfBtn', 'pdfStatus'].forEach((id) => {
                     const el = clonedDoc.getElementById(id); if (el) el.remove();
                   });
                   const clonedNote = clonedDoc.querySelector('.download-note');
                   if (clonedNote) clonedNote.remove();
                 }
-              },
-              jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            }).from(reportRoot).save();
+              }
+            }).from(reportRoot).toCanvas().get('canvas');
+            // Lay the report onto a single A4-WIDTH page (210mm) that grows tall, instead of a page
+            // sized to the raw pixel width (which opened huge in the browser). The image is scaled
+            // to the A4 content width and the page height follows the content aspect ratio, so it
+            // reads like a normal long A4 strip. The +2mm guard keeps html2pdf's page count at 1.
+            const aspect = canvas.height / canvas.width;
+            const pageWidthMm = 210;          // A4 portrait width
+            const marginMm = 8;
+            const innerWidthMm = pageWidthMm - marginMm * 2;
+            const pageHeightMm = innerWidthMm * aspect + marginMm * 2 + 2;
+            await html2pdf().set({
+              margin: marginMm,
+              filename: 'engineering-drawing-qa-report.pdf',
+              image: { type: 'jpeg', quality: 0.95 },
+              jsPDF: { unit: 'mm', format: [pageWidthMm, pageHeightMm], orientation: 'portrait', compress: true }
+            }).from(canvas, 'canvas').save();
             if (pdfStatus) { pdfStatus.textContent = 'PDF download started.'; }
           } catch (error) {
             console.error('PDF export failed:', error);

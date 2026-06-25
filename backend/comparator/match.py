@@ -116,15 +116,50 @@ def cluster_runs(
             parent[ra] = rb
 
     gap = config.cluster_gap_pts
-    for i in range(n):
-        for j in range(i + 1, n):
-            if _is_stack(runs[i], runs[j], gap):
-                union(i, j)
-
-    # Leader-line linkage: a segment endpoint near two distinct runs links them.
     lg = config.leader_gap_pts
+
+    # Spatial grid: index each run into every cell its bbox (expanded by the max linkage
+    # distance) touches, so proximity queries skip the full O(n²) scan. Two runs can only be
+    # close enough to link if they share a cell, and any point within `lg` of a run's bbox
+    # falls in a cell that run was registered into.
+    max_dist = max(gap, lg)
+    cell_size = max(100.0, max_dist * 2.0)
+    grid: dict[tuple[int, int], list[int]] = {}
+    for i, run in enumerate(runs):
+        x0, y0, x1, y1 = run.bbox
+        col_start = int((x0 - max_dist) // cell_size)
+        col_end = int((x1 + max_dist) // cell_size)
+        row_start = int((y0 - max_dist) // cell_size)
+        row_end = int((y1 + max_dist) // cell_size)
+        for r in range(row_start, row_end + 1):
+            for c in range(col_start, col_end + 1):
+                grid.setdefault((r, c), []).append(i)
+
+    # Stack linkage: only run pairs sharing a cell can stack; dedup pairs across shared cells.
+    checked: set[tuple[int, int]] = set()
+    for cell_runs in grid.values():
+        m = len(cell_runs)
+        for a in range(m):
+            i = cell_runs[a]
+            for b in range(a + 1, m):
+                j = cell_runs[b]
+                pair = (i, j) if i < j else (j, i)
+                if pair in checked:
+                    continue
+                checked.add(pair)
+                if _is_stack(runs[i], runs[j], gap):
+                    union(i, j)
+
+    # Leader-line linkage: a segment links every run near p1 with every run near p2.
     for p1, p2 in segments:
-        near = [k for k in range(n) if _near_bbox(runs[k].bbox, p1, lg) or _near_bbox(runs[k].bbox, p2, lg)]
+        near: list[int] = []
+        seen: set[int] = set()
+        for pt in (p1, p2):
+            cell = (int(pt[1] // cell_size), int(pt[0] // cell_size))
+            for k in grid.get(cell, ()):
+                if k not in seen and _near_bbox(runs[k].bbox, pt, lg):
+                    seen.add(k)
+                    near.append(k)
         for a in range(len(near)):
             for b in range(a + 1, len(near)):
                 union(near[a], near[b])

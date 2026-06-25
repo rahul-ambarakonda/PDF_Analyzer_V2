@@ -108,7 +108,9 @@ export function ReportPanel({
                 </div>
                 <div className="rc-sum-item">
                   <span>Score</span>
-                  <strong>{report.overallScore === null ? '—' : `${report.overallScore}/100`}</strong>
+                  <strong>
+                    {report.overallScore === null ? '—' : `${report.overallScore}/100`}
+                  </strong>
                 </div>
               </div>
 
