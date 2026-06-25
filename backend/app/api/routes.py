@@ -38,9 +38,9 @@ def _worker(request: Request) -> ComparisonWorker:
 
 
 def _pdf_uploads(files: list[UploadFile]) -> dict[str, tuple[str, UploadFile]]:
-    """Keep PDFs only, keyed by case-folded basename so pairing ignores filename case
-    (e.g. ``abc.pdf`` matches ``ABC.pdf``). The value preserves the original basename
-    for display. Last writer wins, matching legacy behaviour."""
+    """Keep PDFs only, keyed by *case-folded* basename so 'abc.pdf' pairs with 'ABC.pdf'
+    (last writer wins, matching legacy behaviour). The value carries the original basename so
+    reports and unmatched lists still show the filename as the user supplied it."""
     out: dict[str, tuple[str, UploadFile]] = {}
     for f in files:
         if f.filename and f.filename.lower().endswith(".pdf"):
@@ -76,14 +76,14 @@ async def compare(
             or len(cand_files) > settings.max_files_per_side):
         raise ApiError(400, f"Too many files (max {settings.max_files_per_side} per side).")
 
+    # Pair on the case-folded keys; carry each pair under the reference's original basename.
     matched_keys = sorted(set(ref_files) & set(cand_files))
     if not matched_keys:
         raise ApiError(400, "No filenames match between the reference and candidate sets.")
     if len(matched_keys) > settings.max_pairs:
         raise ApiError(400, f"Too many matched pairs (max {settings.max_pairs}).")
 
-    # Read bytes into memory, enforcing per-file and total size caps. Pairs are keyed by the
-    # reference's original (case-preserved) basename for display; matching itself is case-folded.
+    # Read bytes into memory, enforcing per-file and total size caps.
     pairs_bytes: dict[str, tuple[bytes, bytes]] = {}
     total = 0
     for key in matched_keys:
@@ -102,20 +102,15 @@ async def compare(
     job = store.create()
     for name in pairs_bytes:
         job.pairs[name] = PairResult(name=name)
-    matched = list(pairs_bytes)
-    job.unmatched_reference = sorted(
-        orig for key, (orig, _) in ref_files.items() if key not in cand_files
-    )
-    job.unmatched_candidate = sorted(
-        orig for key, (orig, _) in cand_files.items() if key not in ref_files
-    )
+    job.unmatched_reference = sorted(orig for key, (orig, _) in ref_files.items() if key not in cand_files)
+    job.unmatched_candidate = sorted(orig for key, (orig, _) in cand_files.items() if key not in ref_files)
 
     # Snapshot the accepted ("queued") response before handing off — the worker may start and
     # flip the status to "running" before this returns.
     body = CompareAccepted(
         job_id=job.id,
         status=job.status.value,
-        pair_count=len(matched),
+        pair_count=len(pairs_bytes),
         unmatched_reference=job.unmatched_reference,
         unmatched_candidate=job.unmatched_candidate,
     ).model_dump()

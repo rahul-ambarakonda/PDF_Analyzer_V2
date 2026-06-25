@@ -100,6 +100,7 @@ def cluster_runs(
 
     Two runs merge when they form a stack (close gap, same orientation, overlapping
     perpendicular extent) or share a leader-line endpoint.
+    Uses a 2D spatial grid to optimize pairwise spatial lookups.
     """
     n = len(runs)
     parent = list(range(n))
@@ -117,52 +118,52 @@ def cluster_runs(
 
     gap = config.cluster_gap_pts
     lg = config.leader_gap_pts
-
-    # Spatial grid: index each run into every cell its bbox (expanded by the max linkage
-    # distance) touches, so proximity queries skip the full O(n²) scan. Two runs can only be
-    # close enough to link if they share a cell, and any point within `lg` of a run's bbox
-    # falls in a cell that run was registered into.
     max_dist = max(gap, lg)
     cell_size = max(100.0, max_dist * 2.0)
+
+    # Build spatial grid mapping (row, col) -> list of run indices
     grid: dict[tuple[int, int], list[int]] = {}
     for i, run in enumerate(runs):
         x0, y0, x1, y1 = run.bbox
-        col_start = int((x0 - max_dist) // cell_size)
-        col_end = int((x1 + max_dist) // cell_size)
-        row_start = int((y0 - max_dist) // cell_size)
-        row_end = int((y1 + max_dist) // cell_size)
+        x0_exp = x0 - max_dist
+        y0_exp = y0 - max_dist
+        x1_exp = x1 + max_dist
+        y1_exp = y1 + max_dist
+
+        col_start = int(x0_exp // cell_size)
+        col_end = int(x1_exp // cell_size)
+        row_start = int(y0_exp // cell_size)
+        row_end = int(y1_exp // cell_size)
+
         for r in range(row_start, row_end + 1):
             for c in range(col_start, col_end + 1):
                 grid.setdefault((r, c), []).append(i)
 
-    # Stack linkage: only run pairs sharing a cell can stack; dedup pairs across shared cells.
-    checked: set[tuple[int, int]] = set()
+    # 1. Stack checking: check pairs within the same cell
+    checked_pairs = set()
     for cell_runs in grid.values():
-        m = len(cell_runs)
-        for a in range(m):
-            i = cell_runs[a]
-            for b in range(a + 1, m):
-                j = cell_runs[b]
+        n_cell = len(cell_runs)
+        for idx_a in range(n_cell):
+            i = cell_runs[idx_a]
+            for idx_b in range(idx_a + 1, n_cell):
+                j = cell_runs[idx_b]
                 pair = (i, j) if i < j else (j, i)
-                if pair in checked:
-                    continue
-                checked.add(pair)
-                if _is_stack(runs[i], runs[j], gap):
-                    union(i, j)
+                if pair not in checked_pairs:
+                    checked_pairs.add(pair)
+                    if _is_stack(runs[i], runs[j], gap):
+                        union(i, j)
 
-    # Leader-line linkage: a segment links every run near p1 with every run near p2.
+    # 2. Leader-line linkage: a segment endpoint near two distinct runs links them.
     for p1, p2 in segments:
-        near: list[int] = []
-        seen: set[int] = set()
         for pt in (p1, p2):
-            cell = (int(pt[1] // cell_size), int(pt[0] // cell_size))
-            for k in grid.get(cell, ()):
-                if k not in seen and _near_bbox(runs[k].bbox, pt, lg):
-                    seen.add(k)
-                    near.append(k)
-        for a in range(len(near)):
-            for b in range(a + 1, len(near)):
-                union(near[a], near[b])
+            px, py = pt
+            col = int(px // cell_size)
+            row = int(py // cell_size)
+            cell_runs = grid.get((row, col), [])
+            near = [k for k in cell_runs if _near_bbox(runs[k].bbox, pt, lg)]
+            for idx_a in range(len(near)):
+                for idx_b in range(idx_a + 1, len(near)):
+                    union(near[idx_a], near[idx_b])
 
     groups: dict[int, list[int]] = {}
     for i in range(n):

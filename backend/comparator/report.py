@@ -29,7 +29,7 @@ from .detect import Defect
 # Stable class ordering for deterministic output + box colors (RGB).
 CLASS_ORDER = [
     "missing_text", "missing_annotation", "text_overlap",
-    "text_misplacement", "font_glyph_corruption",
+    "text_misplacement", "font_glyph_corruption", "visual_defect",
 ]
 CLASS_COLOR = {
     "missing_text": (239, 68, 68),          # red
@@ -37,6 +37,7 @@ CLASS_COLOR = {
     "text_overlap": (249, 115, 22),         # orange
     "text_misplacement": (59, 130, 246),    # blue
     "font_glyph_corruption": (245, 158, 11),  # amber
+    "visual_defect": (220, 38, 38),         # crimson red
 }
 _REPORT_MAX_DIM = 2200  # cap raster size in the HTML report
 
@@ -144,10 +145,29 @@ def classify_issue(record: dict, page_w: float, page_h: float) -> str:
     combined = (f"{record.get('message', '')} {record.get('ref_text') or ''} "
                 f"{record.get('cand_text') or ''}").upper()
 
+    if cls == "added_text":
+        if record.get("zone") == "title-block":
+            return "Title Block"
+        if _SYMBOL_RE.search(combined) or _DIM_RE.search(combined) or "DIMENSION" in combined or "TOLERANCE" in combined:
+            return "Dimensions & Tolerances"
+        return "Notes & Annotations"
     if cls == "text_overlap":
         return "Visual Quality"
+
     if cls == "font_glyph_corruption":
         return "Symbols & Standards" if _SYMBOL_RE.search(combined) else "Conversion Integrity"
+    if cls == "visual_defect":
+        if record.get("zone") == "title-block":
+            return "Title Block"
+        bbox = record.get("bbox_cand") or record.get("bbox_ref") or [0.0, 0.0, 0.0, 0.0]
+        cx = (bbox[0] + bbox[2]) / 2.0
+        cy = (bbox[1] + bbox[3]) / 2.0
+        nx = cx / max(1.0, page_w)
+        ny = cy / max(1.0, page_h)
+        if nx < 0.06 or nx > 0.94 or ny < 0.06 or ny > 0.94:
+            return "Drawing Layout"
+        return "Views & Geometry"
+
 
     # missing_text / missing_annotation / text_misplacement -> location + content heuristics.
     if record.get("zone") == "title-block":
@@ -207,7 +227,6 @@ def _render_page_png(page: fitz.Page, records: list[dict], dpi: int) -> str:
             continue
         color = CLASS_COLOR.get(r["class"], (128, 128, 128))
         x0, y0, x1, y1 = (v * zoom for v in bbox)
-        # PIL requires x0<=x1 and y0<=y1; a registration-mapped bbox can come back inverted.
         x0, x1 = min(x0, x1), max(x0, x1)
         y0, y1 = min(y0, y1), max(y0, y1)
         draw.rectangle([x0, y0, x1, y1], outline=color, width=max(2, int(2 * zoom)))
@@ -540,9 +559,10 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
       <table class="audit-summary-table">
         <thead>
           <tr>
-            <th>Audit Category</th>
-            <th>Compliance Status</th>
-            <th>Failures (Pages Affected)</th>
+            <th style="width: 20%;">Audit Category</th>
+            <th style="width: 15%;">Compliance Status</th>
+            <th style="width: 20%;">Failures (Pages Affected)</th>
+            <th style="width: 45%;">Compliance Observation / Justification</th>
           </tr>
         </thead>
         <tbody>
@@ -555,11 +575,13 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
               </span>
             </td>
             <td class="failures-cell">{{ cat_data.failed_count }} page(s) failed</td>
+            <td style="color: var(--text-muted); font-size: 0.88rem; line-height: 1.4;">{{ cat_data.justification }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
+
 
     <!-- Drawing Quality Scoreboard Section -->
     <div class="section-title">Drawing Quality Scoreboard</div>
@@ -626,7 +648,43 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
         <div class="summary-text">{{ page.summary }}</div>
         {% endif %}
 
+        <!-- BOM Comparison Section -->
+        <div class="bom-section" style="margin-bottom: 24px; padding: 20px; background-color: rgba(255, 255, 255, 0.015); border: 1px solid var(--panel-border); border-radius: 12px;">
+          <div style="font-weight: 700; font-size: 1.05rem; color: #a5b4fc; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+            📋 Bill of Materials (BOM) &amp; Tables Audit:
+          </div>
+          {% if page.bom_issues %}
+          <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.9rem;">
+            <thead>
+              <tr style="border-bottom: 2px solid var(--panel-border); text-align: left; color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase;">
+                <th style="padding: 8px; width: 10%;">ID</th>
+                <th style="padding: 8px; width: 10%;">Zone</th>
+                <th style="padding: 8px; width: 25%;">Reference Value</th>
+                <th style="padding: 8px; width: 25%;">Creo Value</th>
+                <th style="padding: 8px; width: 30%;">Details / Cause</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for iss in page.bom_issues %}
+              <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
+                <td style="padding: 8px; font-weight: 600; color: var(--color-high);">{{ iss.id }}</td>
+                <td style="padding: 8px;">{{ iss.zone }}</td>
+                <td style="padding: 8px; color: #ef4444;">{{ iss.ref_text or '—' }}</td>
+                <td style="padding: 8px; color: #10b981; font-weight: 600;">{{ iss.cand_text or 'MISSING' }}</td>
+                <td style="padding: 8px; font-style: italic; color: var(--text-muted);">{{ iss.cause }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% else %}
+          <div style="color: var(--color-clean); font-weight: 600; font-size: 0.9rem; display: flex; align-items: center; gap: 6px;">
+            ✨ BOM Table matched perfectly. No cell value discrepancies or missing rows detected.
+          </div>
+          {% endif %}
+        </div>
+
         <div class="breakdown-title" style="margin-bottom: 12px; font-weight:700; font-size:1rem; color: #a5b4fc;">Audit Categories Breakdown:</div>
+
 
         <div class="categories-grid">
           {% for cat in page.categories_report %}
@@ -702,8 +760,6 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
             if (pdfStatus) { pdfStatus.textContent = 'PDF export is unavailable in this browser.'; }
             return;
           }
-          // Only html2pdf is exposed globally by the bundle (it does NOT leak html2canvas/jsPDF),
-          // so we drive everything through html2pdf and just size the page to fit on ONE sheet.
           if (typeof html2pdf === 'undefined') {
             if (pdfStatus) { pdfStatus.textContent = 'PDF library did not load. Opening print dialog instead.'; }
             window.print();
@@ -720,8 +776,8 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
             //     ~268M px area) — past that it returns a blank bitmap.
             //  2. Feed that exact canvas back via .from(canvas, 'canvas') so html2pdf REUSES it
             //     (no second render — re-rendering produced a different height and split the page)
-            //     and size the jsPDF page to the canvas aspect + margins, so html2pdf's own
-            //     page-count math (ceil(canvasH / floor(canvasW * innerRatio))) resolves to 1.
+            //     and lay it onto a single A4-WIDTH page (210mm) that grows tall, so it opens at a
+            //     normal width in the browser instead of a giant pixel-width page.
             const w = reportRoot.scrollWidth;
             const h = reportRoot.scrollHeight;
             const MAX_DIM = 16000;
@@ -754,12 +810,10 @@ HTML_TEMPLATE = Template("""<!DOCTYPE html>
                 }
               }
             }).from(reportRoot).toCanvas().get('canvas');
-            // Lay the report onto a single A4-WIDTH page (210mm) that grows tall, instead of a page
-            // sized to the raw pixel width (which opened huge in the browser). The image is scaled
-            // to the A4 content width and the page height follows the content aspect ratio, so it
-            // reads like a normal long A4 strip. The +2mm guard keeps html2pdf's page count at 1.
+            // A4 portrait width, image scaled to fit it, height follows the content aspect ratio.
+            // The +2mm guard keeps html2pdf's page count pinned at 1.
             const aspect = canvas.height / canvas.width;
-            const pageWidthMm = 210;          // A4 portrait width
+            const pageWidthMm = 210;
             const marginMm = 8;
             const innerWidthMm = pageWidthMm - marginMm * 2;
             const pageHeightMm = innerWidthMm * aspect + marginMm * 2 + 2;
@@ -824,6 +878,16 @@ def _build_page(num: int, page: fitz.Page, records: list[dict],
     else:
         summary = f"Page {num} matches the reference drawing in all audit categories."
 
+    bom_issues = [
+        {
+            "id": i["id"], "message": i["message"], "zone": i.get("zone"),
+            "ref_text": i.get("ref_text"), "cand_text": i.get("cand_text"),
+            "cause": i.get("cause"), "fix": i.get("fix"),
+            "severity": i.get("severity")
+        }
+        for i in records if classify_issue(i, pw, ph) == "BOM / Tables"
+    ]
+
     png = _render_page_png(page, records, dpi)
     return {
         "index": num,
@@ -834,8 +898,27 @@ def _build_page(num: int, page: fitz.Page, records: list[dict],
         "summary": summary,
         "comparison_image": f"data:image/png;base64,{png}",
         "categories_report": categories_report,
+        "bom_issues": bom_issues,
         "issues": records,
     }
+
+
+
+CATEGORY_DESCRIPTIONS = {
+    "Drawing Layout": "Page borders, zones, and grid reference lines.",
+    "Views & Geometry": "Orthographic views, projections, and graphical shapes.",
+    "Dimensions & Tolerances": "Linear, angular, and geometric dimension symbols/tolerances.",
+    "Notes & Annotations": "General notes, local callouts, and text markings.",
+    "Title Block": "Signature fields, drawing numbers, and static title labels.",
+    "Revision History": "Revision table indexes, dates, and modification notes.",
+    "BOM / Tables": "Bill of Materials table grid structure and cell contents.",
+    "Symbols & Standards": "Welding, surface finish, grounding, and material symbols.",
+    "Styling & Layers": "Line weights, colors, and PDF vector layer attributes.",
+    "Scale & Proportion": "Drawing view scale notations and visual proportions.",
+    "Visual Quality": "Text collisions, overlaps, and legibility checks.",
+    "Conversion Integrity": "Font substitution, rendering anomalies, and PDF encoding checks.",
+    "Compliance Rules": "Company standards, border guidelines, and general QA check rules.",
+}
 
 
 def render_html(report: dict, cand_doc: fitz.Document, output_path: str | Path, config: Config) -> None:
@@ -848,6 +931,13 @@ def render_html(report: dict, cand_doc: fitz.Document, output_path: str | Path, 
         _build_page(num, cand_doc[num - 1], by_page.get(num, []), global_categories, config.render_dpi)
         for num in range(1, len(cand_doc) + 1)
     ]
+
+    for name, cat_data in global_categories.items():
+        desc = CATEGORY_DESCRIPTIONS.get(name, "")
+        if cat_data["status"] == "PASS":
+            cat_data["justification"] = f"PASS: {desc} No discrepancies detected."
+        else:
+            cat_data["justification"] = f"FAIL: {desc} Discrepancies found on {cat_data['failed_count']} page(s). Review details below."
 
     sev = {"high": 0, "medium": 0, "low": 0}
     for r in report["defects"]:
@@ -869,3 +959,4 @@ def render_html(report: dict, cand_doc: fitz.Document, output_path: str | Path, 
         global_categories=global_categories,
     )
     Path(output_path).write_text(html, encoding="utf-8")
+

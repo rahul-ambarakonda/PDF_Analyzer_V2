@@ -31,15 +31,12 @@ class Normalizer:
                     pairs.append((member, canonical))
         # Replace longer members first so multi-char tokens win over single chars.
         self._pairs = sorted(pairs, key=lambda p: len(p[0]), reverse=True)
-        # Memoize normalization + edit-distance results: the same runs are compared many
-        # times across matching/clustering, and normalization is pure for a given config.
-        self._norm_cache: dict[str, str] = {}
-        self._edit_cache: dict[tuple[str, str], float] = {}
+        self._cache = {}
+        self._edit_cache = {}
 
     def normalize(self, text: str) -> str:
-        cached = self._norm_cache.get(text)
-        if cached is not None:
-            return cached
+        if text in self._cache:
+            return self._cache[text]
         s = text
         if self.config.collapse_whitespace:
             s = " ".join(s.split())
@@ -53,7 +50,7 @@ class Normalizer:
         for member, canonical in self._pairs:
             if member in s:
                 s = s.replace(member, canonical)
-        self._norm_cache[text] = s
+        self._cache[text] = s
         return s
 
     def equal(self, a: str, b: str) -> bool:
@@ -61,10 +58,9 @@ class Normalizer:
 
     def edit_distance_norm(self, a: str, b: str) -> float:
         """Levenshtein distance between normalized strings, scaled to [0, 1]."""
-        key = (a, b) if a <= b else (b, a)  # symmetric: cache once per unordered pair
-        cached = self._edit_cache.get(key)
-        if cached is not None:
-            return cached
+        key = (a, b) if a < b else (b, a)
+        if key in self._edit_cache:
+            return self._edit_cache[key]
         na, nb = self.normalize(a), self.normalize(b)
         if na == nb:
             res = 0.0
@@ -73,6 +69,7 @@ class Normalizer:
             res = d / max(len(na), len(nb), 1)
         self._edit_cache[key] = res
         return res
+
 
 
 def _levenshtein(a: str, b: str) -> int:
